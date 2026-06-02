@@ -1,19 +1,18 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
-export default function HomePage() {
+function HomePageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [tab, setTab] = useState<"join" | "create">("join");
 
-  // Join form state
-  const [joinCode, setJoinCode] = useState("");
+  const [joinCode, setJoinCode] = useState(() => searchParams.get("code")?.toUpperCase() ?? "");
   const [nickname, setNickname] = useState("");
   const [joinError, setJoinError] = useState("");
   const [joinLoading, setJoinLoading] = useState(false);
 
-  // Create form state
   const [hostPin, setHostPin] = useState("");
   const [createError, setCreateError] = useState("");
   const [createLoading, setCreateLoading] = useState(false);
@@ -21,7 +20,9 @@ export default function HomePage() {
   async function handleJoin(e: React.FormEvent) {
     e.preventDefault();
     setJoinError("");
-    if (!joinCode.trim() || !nickname.trim()) {
+    const code = joinCode.trim().toUpperCase();
+    const nick = nickname.trim();
+    if (!code || !nick) {
       setJoinError("Room code and nickname are required.");
       return;
     }
@@ -30,10 +31,7 @@ export default function HomePage() {
       const res = await fetch("/api/rooms/join", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          code: joinCode.trim().toUpperCase(),
-          nickname: nickname.trim(),
-        }),
+        body: JSON.stringify({ code, nickname: nick }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -53,27 +51,22 @@ export default function HomePage() {
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault();
     setCreateError("");
-    if (!hostPin.trim()) {
-      setCreateError("PIN is required.");
-      return;
-    }
-    if (hostPin.trim().length < 4) {
-      setCreateError("PIN must be at least 4 characters.");
-      return;
-    }
+    const pin = hostPin.trim();
+    if (!pin) { setCreateError("PIN is required."); return; }
+    if (pin.length < 4) { setCreateError("PIN must be at least 4 characters."); return; }
     setCreateLoading(true);
     try {
       const res = await fetch("/api/rooms/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ hostPin: hostPin.trim() }),
+        body: JSON.stringify({ hostPin: pin }),
       });
       const data = await res.json();
       if (!res.ok) {
         setCreateError(data.error ?? "Failed to create room.");
         return;
       }
-      sessionStorage.setItem("hostPin", hostPin.trim());
+      sessionStorage.setItem("hostPin", pin);
       router.push(`/host/${data.code}`);
     } catch {
       setCreateError("Network error. Please try again.");
@@ -84,43 +77,41 @@ export default function HomePage() {
 
   return (
     <main className="flex-1 flex flex-col items-center justify-center px-4 py-12 min-h-screen">
-      <div className="mb-10 text-center">
-        <h1 className="text-5xl font-black tracking-tight bg-gradient-to-r from-purple-400 via-pink-400 to-yellow-400 bg-clip-text text-transparent">
+
+      {/* Hero */}
+      <div className="mb-10 text-center select-none animate-slide-up">
+        <div className="text-6xl mb-3">🎂</div>
+        <h1 className="text-5xl sm:text-6xl font-black tracking-tight text-gradient-party mb-2">
           Party Game
         </h1>
-        <p className="mt-2 text-gray-400 text-sm">
-          Quiplash-style · Made for Nadav&apos;s birthday 🎂
+        <p className="text-indigo-300/70 text-base font-medium">
+          Nadav&apos;s 28th Birthday&nbsp;·&nbsp;Quiplash-style
         </p>
       </div>
 
-      <div className="w-full max-w-sm">
-        <div className="flex rounded-xl overflow-hidden border border-white/10 mb-6">
-          <button
-            onClick={() => setTab("join")}
-            className={`flex-1 py-3 text-sm font-semibold transition-colors ${
-              tab === "join"
-                ? "bg-purple-600 text-white"
-                : "bg-white/5 text-gray-400 hover:bg-white/10"
-            }`}
-          >
-            Join a Room
-          </button>
-          <button
-            onClick={() => setTab("create")}
-            className={`flex-1 py-3 text-sm font-semibold transition-colors ${
-              tab === "create"
-                ? "bg-purple-600 text-white"
-                : "bg-white/5 text-gray-400 hover:bg-white/10"
-            }`}
-          >
-            Create Room (Host)
-          </button>
+      <div className="w-full max-w-sm animate-slide-up-1">
+
+        {/* Tab switcher */}
+        <div className="flex rounded-2xl overflow-hidden glass mb-6 p-1 gap-1">
+          {(["join", "create"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${
+                tab === t
+                  ? "bg-purple-600 text-white shadow-lg"
+                  : "text-gray-400 hover:text-gray-200"
+              }`}
+            >
+              {t === "join" ? "Join a Room" : "Create Room"}
+            </button>
+          ))}
         </div>
 
         {tab === "join" ? (
           <form onSubmit={handleJoin} className="flex flex-col gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
+            <div className="animate-slide-up-1">
+              <label className="block text-xs font-bold text-indigo-300/70 uppercase tracking-widest mb-2">
                 Room Code
               </label>
               <input
@@ -130,64 +121,85 @@ export default function HomePage() {
                 placeholder="ABCDE"
                 maxLength={6}
                 autoCapitalize="characters"
-                className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white text-center text-2xl font-bold tracking-widest placeholder-gray-600 focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/30"
+                autoCorrect="off"
+                spellCheck={false}
+                inputMode="text"
+                className="w-full px-4 py-4 rounded-2xl glass text-white text-center text-4xl font-black tracking-widest placeholder-white/20 focus:outline-none focus:border-purple-500/60 focus:ring-2 focus:ring-purple-500/30 transition-all"
               />
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
+            <div className="animate-slide-up-2">
+              <label className="block text-xs font-bold text-indigo-300/70 uppercase tracking-widest mb-2">
                 Your Nickname
               </label>
               <input
                 type="text"
                 value={nickname}
                 onChange={(e) => setNickname(e.target.value)}
-                placeholder="Moshe"
+                placeholder="Enter your name"
                 maxLength={20}
-                className="auto-dir w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white text-xl placeholder-gray-600 focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/30"
+                autoCorrect="off"
+                className="auto-dir w-full px-4 py-4 rounded-2xl glass text-white text-xl placeholder-white/20 focus:outline-none focus:border-purple-500/60 focus:ring-2 focus:ring-purple-500/30 transition-all"
               />
             </div>
             {joinError && (
-              <p className="text-red-400 text-sm text-center">{joinError}</p>
+              <p className="text-rose-400 text-sm text-center font-medium animate-slide-up" role="alert">
+                {joinError}
+              </p>
             )}
             <button
               type="submit"
               disabled={joinLoading}
-              className="mt-2 w-full py-4 rounded-xl bg-purple-600 hover:bg-purple-500 active:scale-95 text-white text-xl font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              className="btn btn-purple w-full py-5 text-xl rounded-2xl animate-slide-up-3"
             >
-              {joinLoading ? "Joining…" : "Join Game"}
+              {joinLoading ? "Joining…" : "Join Game 🎉"}
             </button>
           </form>
         ) : (
           <form onSubmit={handleCreate} className="flex flex-col gap-4">
-            <div>
-              <label className="block text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
+            <div className="animate-slide-up-1">
+              <label className="block text-xs font-bold text-indigo-300/70 uppercase tracking-widest mb-2">
                 Host PIN
               </label>
               <input
                 type="text"
                 value={hostPin}
                 onChange={(e) => setHostPin(e.target.value)}
-                placeholder="Choose a PIN"
+                placeholder="Choose a PIN (≥ 4 chars)"
                 maxLength={20}
-                className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white text-xl placeholder-gray-600 focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/30"
+                autoCorrect="off"
+                className="w-full px-4 py-4 rounded-2xl glass text-white text-xl placeholder-white/20 focus:outline-none focus:border-purple-500/60 focus:ring-2 focus:ring-purple-500/30 transition-all"
               />
-              <p className="mt-1 text-xs text-gray-500">
-                You&apos;ll need this PIN to access the host screen.
+              <p className="mt-2 text-xs text-white/30 text-center">
+                You&apos;ll need this PIN to control the game from the host screen.
               </p>
             </div>
             {createError && (
-              <p className="text-red-400 text-sm text-center">{createError}</p>
+              <p className="text-rose-400 text-sm text-center font-medium animate-slide-up" role="alert">
+                {createError}
+              </p>
             )}
             <button
               type="submit"
               disabled={createLoading}
-              className="mt-2 w-full py-4 rounded-xl bg-pink-600 hover:bg-pink-500 active:scale-95 text-white text-xl font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              className="btn btn-purple w-full py-5 text-xl rounded-2xl animate-slide-up-2"
             >
-              {createLoading ? "Creating…" : "Create Room"}
+              {createLoading ? "Creating…" : "Create Room 🎮"}
             </button>
           </form>
         )}
       </div>
     </main>
+  );
+}
+
+export default function HomePage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="w-10 h-10 rounded-full border-4 border-purple-500/30 border-t-purple-500 animate-spin-game" />
+      </div>
+    }>
+      <HomePageContent />
+    </Suspense>
   );
 }
