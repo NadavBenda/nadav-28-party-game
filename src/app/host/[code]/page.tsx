@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { useGameRoom } from "@/hooks/useGameRoom";
+import { createClient } from "@/lib/supabase/client";
 import type { Room, Player } from "@/lib/types";
 
-// ─── Tiny shared UI pieces ────────────────────────────────────────────────────
+// ─── Shared UI ────────────────────────────────────────────────────────────────
 
 function Spinner() {
   return (
@@ -28,10 +29,10 @@ function ErrorCard({ message }: { message: string }) {
 // ─── PIN Gate ─────────────────────────────────────────────────────────────────
 
 function PinGate({
-  storedPin,
+  correctPin,
   onVerify,
 }: {
-  storedPin: string;
+  correctPin: string;
   onVerify: (pin: string) => void;
 }) {
   const [input, setInput] = useState("");
@@ -39,7 +40,8 @@ function PinGate({
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (input.trim() === storedPin) {
+    if (input.trim() === correctPin) {
+      sessionStorage.setItem("hostPin", input.trim());
       onVerify(input.trim());
     } else {
       setErr("Wrong PIN. Try again.");
@@ -72,29 +74,33 @@ function PinGate({
 
 // ─── Host Lobby ───────────────────────────────────────────────────────────────
 
-function HostLobby({
-  room,
-  players,
-  pin,
-}: {
-  room: Room;
-  players: Player[];
-  pin: string;
-}) {
+function HostLobby({ room, players, pin }: { room: Room; players: Player[]; pin: string }) {
   const [promptsText, setPromptsText] = useState("");
   const [savedCount, setSavedCount] = useState<number | null>(null);
   const [savingPrompts, setSavingPrompts] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState("");
+  const [loadingPromptCount, setLoadingPromptCount] = useState(true);
+
+  // Load existing prompt count on mount so Start Game works after a host refresh
+  useEffect(() => {
+    const supabase = createClient();
+    supabase
+      .from("prompts")
+      .select("id", { count: "exact", head: true })
+      .eq("room_id", room.id)
+      .eq("used", false)
+      .then(({ count }) => {
+        setSavedCount(count ?? 0);
+        setLoadingPromptCount(false);
+      });
+  }, [room.id]);
 
   async function savePrompts(e: React.FormEvent) {
     e.preventDefault();
     setSaveError("");
-    const lines = promptsText
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean);
+    const lines = promptsText.split("\n").map((l) => l.trim()).filter(Boolean);
     if (!lines.length) { setSaveError("Enter at least one prompt."); return; }
     setSavingPrompts(true);
     try {
@@ -123,7 +129,7 @@ function HostLobby({
         body: JSON.stringify({ pin, action: "start_round" }),
       });
       const data = await res.json();
-      if (!res.ok) { setStartError(data.error ?? "Failed to start game."); }
+      if (!res.ok) setStartError(data.error ?? "Failed to start game.");
     } catch {
       setStartError("Network error.");
     } finally {
@@ -131,11 +137,11 @@ function HostLobby({
     }
   }
 
-  const canStart = savedCount !== null && savedCount > 0 && players.length >= 2;
+  const promptsReady = (savedCount ?? 0) > 0;
+  const canStart = promptsReady && players.length >= 2;
 
   return (
     <div className="min-h-screen flex flex-col p-8 max-w-4xl mx-auto w-full">
-      {/* Room code header */}
       <div className="text-center mb-8">
         <p className="text-gray-400 text-sm uppercase tracking-widest mb-1">Room Code</p>
         <p className="text-8xl font-black text-purple-300 tracking-widest">{room.code}</p>
@@ -157,10 +163,7 @@ function HostLobby({
           ) : (
             <ul className="flex flex-col gap-2">
               {players.map((p) => (
-                <li
-                  key={p.id}
-                  className="flex items-center gap-2 bg-white/5 rounded-xl px-4 py-2"
-                >
+                <li key={p.id} className="flex items-center gap-2 bg-white/5 rounded-xl px-4 py-2">
                   <span className="text-purple-400 font-bold">{p.nickname}</span>
                 </li>
               ))}
@@ -176,18 +179,23 @@ function HostLobby({
           <h2 className="text-lg font-bold text-gray-300 mb-4 flex items-center gap-2">
             <span className="text-2xl">📝</span>
             Prompts
+            {!loadingPromptCount && savedCount !== null && savedCount > 0 && (
+              <span className="ml-auto text-green-400 text-sm font-semibold">
+                ✓ {savedCount} ready
+              </span>
+            )}
           </h2>
           <form onSubmit={savePrompts} className="flex flex-col gap-3">
             <textarea
               value={promptsText}
-              onChange={(e) => { setPromptsText(e.target.value); setSavedCount(null); }}
+              onChange={(e) => { setPromptsText(e.target.value); }}
               placeholder={"One prompt per line:\n\nWhat is the most Nadav thing Nadav could do?\nComplete this sentence: Nadav walks into a bar…"}
               rows={8}
               className="auto-dir w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white text-sm placeholder-gray-600 resize-none focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/30"
             />
             {saveError && <p className="text-red-400 text-sm">{saveError}</p>}
-            {savedCount !== null && (
-              <p className="text-green-400 text-sm">✓ {savedCount} prompts saved.</p>
+            {savedCount !== null && savedCount > 0 && promptsText.trim() === "" && (
+              <p className="text-green-400 text-sm">✓ {savedCount} prompts saved. Paste new ones above to replace them.</p>
             )}
             <button
               type="submit"
@@ -205,16 +213,14 @@ function HostLobby({
         {startError && <p className="text-red-400 text-sm mb-3">{startError}</p>}
         <button
           onClick={startGame}
-          disabled={!canStart || starting}
+          disabled={!canStart || starting || loadingPromptCount}
           className="px-16 py-5 rounded-2xl bg-green-600 hover:bg-green-500 text-white text-2xl font-black transition-all active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {starting ? "Starting…" : "🚀 Start Game"}
         </button>
-        {!canStart && (
+        {!canStart && !loadingPromptCount && (
           <p className="text-gray-500 text-sm mt-2">
-            {savedCount === null || savedCount === 0
-              ? "Save prompts first."
-              : "Need at least 2 players."}
+            {!promptsReady ? "Save prompts first." : "Need at least 2 players."}
           </p>
         )}
       </div>
@@ -239,9 +245,8 @@ function HostAnswerPhase({
 }) {
   const [ending, setEnding] = useState(false);
   const [err, setErr] = useState("");
-  const activePlayers = players.filter((p) => p.is_active);
   const answeredIds = new Set(answers.map((a) => a.player_id));
-  const pending = activePlayers.filter((p) => !answeredIds.has(p.id));
+  const pending = players.filter((p) => !answeredIds.has(p.id));
 
   async function endSubmission() {
     setEnding(true); setErr("");
@@ -259,29 +264,26 @@ function HostAnswerPhase({
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-8 max-w-3xl mx-auto w-full">
-      <div className="w-full mb-6">
-        <p className="text-gray-400 text-sm uppercase tracking-widest mb-2 text-center">
-          Round {currentRound.round_number}
+      <p className="text-gray-400 text-sm uppercase tracking-widest mb-2 text-center">
+        Round {currentRound.round_number}
+      </p>
+      <div className="bg-white/5 rounded-2xl p-8 text-center w-full mb-6">
+        <p className="text-4xl font-black text-white leading-tight">
+          {currentRound.prompt_text}
         </p>
-        <div className="bg-white/5 rounded-2xl p-8 text-center">
-          <p className="text-4xl font-black text-white leading-tight">
-            {currentRound.prompt_text}
-          </p>
-        </div>
       </div>
 
       <div className="w-full bg-white/5 rounded-2xl p-6 mb-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-bold text-gray-300">Answers received</h2>
           <span className="text-3xl font-black text-green-400">
-            {answers.length} / {activePlayers.length}
+            {answers.length} / {players.length}
           </span>
         </div>
-        {/* Progress bar */}
         <div className="w-full h-3 bg-white/10 rounded-full overflow-hidden">
           <div
             className="h-full bg-green-500 transition-all duration-500"
-            style={{ width: activePlayers.length ? `${(answers.length / activePlayers.length) * 100}%` : "0%" }}
+            style={{ width: players.length ? `${(answers.length / players.length) * 100}%` : "0%" }}
           />
         </div>
         {pending.length > 0 && (
@@ -306,6 +308,9 @@ function HostAnswerPhase({
       >
         {ending ? "Ending…" : "⏭ End Submission & Start Voting"}
       </button>
+      {answers.length === 0 && (
+        <p className="text-gray-600 text-sm mt-2">Waiting for at least one answer</p>
+      )}
     </div>
   );
 }
@@ -329,10 +334,10 @@ function HostVotingPhase({
 }) {
   const [ending, setEnding] = useState(false);
   const [err, setErr] = useState("");
-  const eligibleVoters = players.filter((p) => {
-    // A player is eligible to vote if they submitted an answer
-    return answers.some((a) => a.player_id === p.id);
-  });
+
+  // Eligible voters: players who submitted an answer
+  const answererIds = new Set(answers.map((a) => a.player_id));
+  const eligibleVoterCount = players.filter((p) => answererIds.has(p.id)).length;
 
   async function endVoting() {
     setEnding(true); setErr("");
@@ -358,24 +363,30 @@ function HostVotingPhase({
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-lg font-bold text-gray-300">Votes received</h2>
           <span className="text-3xl font-black text-pink-400">
-            {votes.length} / {eligibleVoters.length}
+            {votes.length} / {eligibleVoterCount}
           </span>
         </div>
         <div className="w-full h-3 bg-white/10 rounded-full overflow-hidden">
           <div
             className="h-full bg-pink-500 transition-all duration-500"
-            style={{ width: eligibleVoters.length ? `${(votes.length / eligibleVoters.length) * 100}%` : "0%" }}
+            style={{
+              width: eligibleVoterCount ? `${(votes.length / eligibleVoterCount) * 100}%` : "0%",
+            }}
           />
         </div>
       </div>
       {err && <p className="text-red-400 text-sm mb-3">{err}</p>}
+      {/* Button is NEVER disabled due to vote count — host must always be able to advance */}
       <button
         onClick={endVoting}
-        disabled={ending || votes.length === 0}
+        disabled={ending}
         className="px-12 py-4 rounded-2xl bg-pink-600 hover:bg-pink-500 text-white text-xl font-black transition-all active:scale-95 disabled:opacity-40"
       >
         {ending ? "Ending…" : "🏁 Reveal Results"}
       </button>
+      {votes.length === 0 && (
+        <p className="text-gray-500 text-sm mt-2">No votes yet — you can still advance</p>
+      )}
     </div>
   );
 }
@@ -400,7 +411,6 @@ function HostResultsPhase({
   const [advancing, setAdvancing] = useState(false);
   const [err, setErr] = useState("");
 
-  // Sort answers by vote count descending
   const sorted = [...answers]
     .map((a) => ({
       ...a,
@@ -430,23 +440,27 @@ function HostResultsPhase({
         <p className="text-2xl font-bold text-white">{currentRound.prompt_text}</p>
       </div>
       <div className="flex flex-col gap-4 mb-8">
-        {sorted.map((a, i) => (
-          <div
-            key={a.id}
-            className={`rounded-2xl p-5 ${i === 0 && a.voteCount > 0 ? "bg-yellow-900/40 border border-yellow-600" : "bg-white/5"}`}
-          >
-            <div className="flex items-start justify-between gap-4">
-              <p className="text-xl font-bold text-white flex-1">{a.text}</p>
-              <span className={`text-2xl font-black ${a.voteCount > 0 ? "text-yellow-400" : "text-gray-600"}`}>
-                {a.voteCount} {a.voteCount === 1 ? "vote" : "votes"}
-              </span>
+        {sorted.length === 0 ? (
+          <p className="text-gray-500 text-center py-8">No answers this round.</p>
+        ) : (
+          sorted.map((a, i) => (
+            <div
+              key={a.id}
+              className={`rounded-2xl p-5 ${i === 0 && a.voteCount > 0 ? "bg-yellow-900/40 border border-yellow-600" : "bg-white/5"}`}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <p className="text-xl font-bold text-white flex-1">{a.text}</p>
+                <span className={`text-2xl font-black ${a.voteCount > 0 ? "text-yellow-400" : "text-gray-600"}`}>
+                  {a.voteCount} {a.voteCount === 1 ? "vote" : "votes"}
+                </span>
+              </div>
+              <p className="text-sm text-gray-400 mt-1">— {a.authorNickname}</p>
+              {a.voteCount > 0 && (
+                <p className="text-xs text-green-400 mt-1">+{a.voteCount * 100} points</p>
+              )}
             </div>
-            <p className="text-sm text-gray-400 mt-1">— {a.authorNickname}</p>
-            {a.voteCount > 0 && (
-              <p className="text-xs text-green-400 mt-1">+{a.voteCount * 100} points</p>
-            )}
-          </div>
-        ))}
+          ))
+        )}
       </div>
       {err && <p className="text-red-400 text-sm mb-3 text-center">{err}</p>}
       <button
@@ -462,15 +476,7 @@ function HostResultsPhase({
 
 // ─── Leaderboard Phase (host view) ────────────────────────────────────────────
 
-function HostLeaderboard({
-  room,
-  players,
-  pin,
-}: {
-  room: Room;
-  players: Player[];
-  pin: string;
-}) {
+function HostLeaderboard({ room, players, pin }: { room: Room; players: Player[]; pin: string }) {
   const [advancing, setAdvancing] = useState(false);
   const [ending, setEnding] = useState(false);
   const [err, setErr] = useState("");
@@ -543,7 +549,7 @@ function HostLeaderboard({
   );
 }
 
-// ─── Game Over (host view) ─────────────────────────────────────────────────────
+// ─── Game Over (host view) ────────────────────────────────────────────────────
 
 function HostGameOver({ players }: { players: Player[] }) {
   const sorted = [...players].sort((a, b) => b.score - a.score);
@@ -583,49 +589,54 @@ function AdminControls({
   onDone: () => void;
 }) {
   const [msg, setMsg] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  async function action(act: string, extra?: Record<string, unknown>) {
-    setLoading(true); setMsg("");
-    try {
-      const res = await fetch(`/api/rooms/${room.code}/host/action`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pin, action: act, ...extra }),
-      });
-      const data = await res.json();
-      setMsg(res.ok ? (data.message ?? "Done.") : (data.error ?? "Failed."));
-    } catch { setMsg("Network error."); }
-    finally { setLoading(false); }
-  }
-
-  const activePlayers = players.filter((p) => p.is_active);
+  const runAction = useCallback(
+    async (act: string, extra?: Record<string, unknown>) => {
+      setIsLoading(true);
+      setMsg("");
+      try {
+        const res = await fetch(`/api/rooms/${room.code}/host/action`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ pin, action: act, ...extra }),
+        });
+        const data = await res.json();
+        setMsg(res.ok ? (data.message ?? "Done.") : (data.error ?? "Failed."));
+      } catch {
+        setMsg("Network error.");
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [pin, room.code]
+  );
 
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-      <div className="bg-[#1a1a2e] border border-white/20 rounded-2xl p-6 w-full max-w-md">
+      <div className="bg-[#1a1a2e] border border-white/20 rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-xl font-black text-white">Admin Controls</h2>
           <button onClick={onDone} className="text-gray-400 hover:text-white text-2xl">✕</button>
         </div>
         <div className="flex flex-col gap-3">
           <button
-            onClick={() => action("skip_round")}
-            disabled={loading}
+            onClick={() => runAction("skip_round")}
+            disabled={isLoading}
             className="py-3 rounded-xl bg-yellow-700 hover:bg-yellow-600 text-white font-bold transition-colors disabled:opacity-50"
           >
             ⏭ Skip Current Round
           </button>
           <button
-            onClick={() => action("restart_round")}
-            disabled={loading}
+            onClick={() => runAction("restart_round")}
+            disabled={isLoading}
             className="py-3 rounded-xl bg-blue-700 hover:bg-blue-600 text-white font-bold transition-colors disabled:opacity-50"
           >
             🔄 Restart Round
           </button>
           <button
-            onClick={() => action("reset_scores")}
-            disabled={loading}
+            onClick={() => runAction("reset_scores")}
+            disabled={isLoading}
             className="py-3 rounded-xl bg-orange-700 hover:bg-orange-600 text-white font-bold transition-colors disabled:opacity-50"
           >
             🗑 Reset All Scores
@@ -633,11 +644,11 @@ function AdminControls({
           <div className="border-t border-white/10 pt-3">
             <p className="text-xs text-gray-500 mb-2">Remove player:</p>
             <div className="flex flex-col gap-2">
-              {activePlayers.map((p) => (
+              {players.map((p) => (
                 <button
                   key={p.id}
-                  onClick={() => action("remove_player", { playerId: p.id })}
-                  disabled={loading}
+                  onClick={() => runAction("remove_player", { playerId: p.id })}
+                  disabled={isLoading}
                   className="flex justify-between items-center py-2 px-4 rounded-xl bg-red-900/40 hover:bg-red-800/60 text-white text-sm transition-colors disabled:opacity-50"
                 >
                   <span>{p.nickname}</span>
@@ -647,9 +658,7 @@ function AdminControls({
             </div>
           </div>
         </div>
-        {msg && (
-          <p className="mt-4 text-center text-sm text-gray-300">{msg}</p>
-        )}
+        {msg && <p className="mt-4 text-center text-sm text-gray-300">{msg}</p>}
       </div>
     </div>
   );
@@ -662,32 +671,21 @@ export default function HostPage() {
   const code = (params.code as string).toUpperCase();
   const { room, players, currentRound, answers, votes, loading, error } = useGameRoom(code);
 
-  const [pinVerified, setPinVerified] = useState(false);
-  const [pin, setPin] = useState("");
+  // Initialize pin from sessionStorage so the host doesn't re-enter it after a refresh
+  const [pin, setPin] = useState(() =>
+    typeof window !== "undefined" ? (sessionStorage.getItem("hostPin") ?? "") : ""
+  );
   const [showAdmin, setShowAdmin] = useState(false);
 
-  // Auto-verify if PIN was saved in this session
-  useEffect(() => {
-    if (!room) return;
-    const stored = sessionStorage.getItem("hostPin");
-    if (stored && stored === room.host_pin) {
-      setPin(stored);
-      setPinVerified(true);
-    }
-  }, [room]);
-
-  function handleVerify(p: string) {
-    setPin(p);
-    setPinVerified(true);
-    sessionStorage.setItem("hostPin", p);
-  }
+  // pinVerified is derived — it becomes true once room loads and pin matches
+  const pinVerified = pin !== "" && room !== null && pin === room.host_pin;
 
   if (loading) return <Spinner />;
   if (error) return <ErrorCard message={error} />;
   if (!room) return null;
 
   if (!pinVerified) {
-    return <PinGate storedPin={room.host_pin} onVerify={handleVerify} />;
+    return <PinGate correctPin={room.host_pin} onVerify={setPin} />;
   }
 
   function renderState() {
@@ -735,13 +733,16 @@ export default function HostPage() {
       case "game_over":
         return <HostGameOver players={players} />;
       default:
-        return <div className="text-center p-8 text-gray-400">Unknown state: {room.state}</div>;
+        return (
+          <div className="text-center p-8 text-gray-400">
+            Unknown state: {room.state}
+          </div>
+        );
     }
   }
 
   return (
     <>
-      {/* Admin button — always visible when host is verified */}
       <button
         onClick={() => setShowAdmin(true)}
         className="fixed top-4 right-4 z-40 bg-white/10 hover:bg-white/20 text-gray-300 text-sm font-bold px-3 py-2 rounded-lg transition-colors"

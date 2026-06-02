@@ -16,7 +16,6 @@ export interface GameRoomState {
 }
 
 export function useGameRoom(code: string): GameRoomState {
-  // Stable supabase client — created once per component mount
   const supabase = useRef(createClient()).current;
 
   const [room, setRoom] = useState<Room | null>(null);
@@ -27,16 +26,30 @@ export function useGameRoom(code: string): GameRoomState {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Refs so callbacks can read latest values without stale closures
   const roomIdRef = useRef<string | null>(null);
   const currentRoundIdRef = useRef<string | null>(null);
 
+  // Guards against applying stale fetch results when concurrent fetches race
+  const playersRoundGenRef = useRef(0);
+  const answersVotesGenRef = useRef(0);
+
+  // Prevents state updates after component unmounts
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
   const fetchAnswersAndVotes = useCallback(
     async (roundId: string) => {
+      const gen = ++answersVotesGenRef.current;
+
       const [{ data: ans }, { data: vts }] = await Promise.all([
         supabase.from("answers").select("*").eq("round_id", roundId),
         supabase.from("votes").select("*").eq("round_id", roundId),
       ]);
+
+      if (!mountedRef.current || gen !== answersVotesGenRef.current) return;
       setAnswers(ans ?? []);
       setVotes(vts ?? []);
     },
@@ -45,6 +58,8 @@ export function useGameRoom(code: string): GameRoomState {
 
   const fetchPlayersAndRound = useCallback(
     async (roomId: string) => {
+      const gen = ++playersRoundGenRef.current;
+
       const [{ data: pls }, { data: rds }] = await Promise.all([
         supabase
           .from("players")
@@ -59,6 +74,8 @@ export function useGameRoom(code: string): GameRoomState {
           .order("round_number", { ascending: false })
           .limit(1),
       ]);
+
+      if (!mountedRef.current || gen !== playersRoundGenRef.current) return;
 
       setPlayers(pls ?? []);
 
@@ -83,8 +100,6 @@ export function useGameRoom(code: string): GameRoomState {
 
   // ── Initial load ─────────────────────────────────────────────────────────
   useEffect(() => {
-    let cancelled = false;
-
     async function init() {
       const { data: r, error: rErr } = await supabase
         .from("rooms")
@@ -92,7 +107,7 @@ export function useGameRoom(code: string): GameRoomState {
         .eq("code", code.toUpperCase())
         .single();
 
-      if (cancelled) return;
+      if (!mountedRef.current) return;
 
       if (rErr || !r) {
         setError("Room not found. Check the code and try again.");
@@ -103,13 +118,10 @@ export function useGameRoom(code: string): GameRoomState {
       setRoom(r);
       roomIdRef.current = r.id;
       await fetchPlayersAndRound(r.id);
-      if (!cancelled) setLoading(false);
+      if (mountedRef.current) setLoading(false);
     }
 
     init();
-    return () => {
-      cancelled = true;
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code]);
 
@@ -117,13 +129,16 @@ export function useGameRoom(code: string): GameRoomState {
   useEffect(() => {
     if (!room) return;
     const roomId = room.id;
+    let firstSubscribe = true;
 
     const ch = supabase
       .channel(`game:${roomId}`)
       .on(
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "rooms", filter: `id=eq.${roomId}` },
-        (p) => setRoom(p.new as Room)
+        (p) => {
+          if (mountedRef.current) setRoom(p.new as Room);
+        }
       )
       .on(
         "postgres_changes",
@@ -135,7 +150,13 @@ export function useGameRoom(code: string): GameRoomState {
         { event: "*", schema: "public", table: "rounds", filter: `room_id=eq.${roomId}` },
         () => fetchPlayersAndRound(roomId)
       )
-      .subscribe();
+      .subscribe((status) => {
+        // Refetch on reconnect to catch any events missed during disconnect
+        if (status === "SUBSCRIBED" && !firstSubscribe) {
+          fetchPlayersAndRound(roomId);
+        }
+        firstSubscribe = false;
+      });
 
     return () => {
       supabase.removeChannel(ch);
@@ -147,6 +168,7 @@ export function useGameRoom(code: string): GameRoomState {
   useEffect(() => {
     if (!currentRound) return;
     const roundId = currentRound.id;
+    let firstSubscribe = true;
 
     const ch = supabase
       .channel(`round:${roundId}`)
@@ -160,7 +182,12 @@ export function useGameRoom(code: string): GameRoomState {
         { event: "*", schema: "public", table: "votes", filter: `round_id=eq.${roundId}` },
         () => fetchAnswersAndVotes(roundId)
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED" && !firstSubscribe) {
+          fetchAnswersAndVotes(roundId);
+        }
+        firstSubscribe = false;
+      });
 
     return () => {
       supabase.removeChannel(ch);

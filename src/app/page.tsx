@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 
 function HomePageContent() {
@@ -8,8 +8,8 @@ function HomePageContent() {
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<"join" | "create">("join");
 
-  // Join form
-  const [joinCode, setJoinCode] = useState("");
+  // Join form — pre-fill code from ?code= query param if present
+  const [joinCode, setJoinCode] = useState(() => searchParams.get("code")?.toUpperCase() ?? "");
   const [nickname, setNickname] = useState("");
   const [joinError, setJoinError] = useState("");
   const [joinLoading, setJoinLoading] = useState(false);
@@ -18,12 +18,6 @@ function HomePageContent() {
   const [hostPin, setHostPin] = useState("");
   const [createError, setCreateError] = useState("");
   const [createLoading, setCreateLoading] = useState(false);
-
-  // Pre-fill room code from ?code= param (used when player identity is missing)
-  useEffect(() => {
-    const code = searchParams.get("code");
-    if (code) setJoinCode(code.toUpperCase());
-  }, [searchParams]);
 
   async function handleJoin(e: React.FormEvent) {
     e.preventDefault();

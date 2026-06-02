@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useGameRoom } from "@/hooks/useGameRoom";
-import type { Room, Player, Round, Answer } from "@/lib/types";
+import type { Room, Player, Round, Answer, Vote } from "@/lib/types";
 
 // ─── Shared UI ────────────────────────────────────────────────────────────────
 
@@ -36,15 +36,7 @@ function WaitingBanner({ text }: { text: string }) {
 
 // ─── Player Lobby ─────────────────────────────────────────────────────────────
 
-function PlayerLobby({
-  room,
-  players,
-  me,
-}: {
-  room: Room;
-  players: Player[];
-  me: Player;
-}) {
+function PlayerLobby({ room, players, me }: { room: Room; players: Player[]; me: Player }) {
   return (
     <div className="flex flex-col items-center justify-center min-h-screen px-4 py-8 text-center">
       <div className="mb-8">
@@ -77,6 +69,16 @@ function PlayerLobby({
 
 // ─── Answer Submission ────────────────────────────────────────────────────────
 
+function SubmittedScreen({ emoji, title, subtitle }: { emoji: string; title: string; subtitle: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen px-4 text-center">
+      <div className="text-6xl mb-4">{emoji}</div>
+      <p className="text-2xl font-bold text-green-400 mb-2">{title}</p>
+      <p className="text-gray-400">{subtitle}</p>
+    </div>
+  );
+}
+
 function PlayerAnswerForm({
   round,
   me,
@@ -89,12 +91,20 @@ function PlayerAnswerForm({
   const [text, setText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState("");
-  const [submitted, setSubmitted] = useState(!!existingAnswer);
+  // Local submitted flag: set to true after successful submit.
+  // We also treat existingAnswer as "already submitted" (handles page refresh).
+  const [localSubmitted, setLocalSubmitted] = useState(false);
 
-  // If we already have an answer from the hook (e.g. page reload), show submitted state
-  useEffect(() => {
-    if (existingAnswer) setSubmitted(true);
-  }, [existingAnswer]);
+  // Show submitted state if we have an existing answer OR just submitted locally
+  if (localSubmitted || existingAnswer) {
+    return (
+      <SubmittedScreen
+        emoji="✅"
+        title="Answer submitted!"
+        subtitle="Waiting for others…"
+      />
+    );
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -108,19 +118,9 @@ function PlayerAnswerForm({
       });
       const data = await res.json();
       if (!res.ok) { setErr(data.error ?? "Failed to submit."); return; }
-      setSubmitted(true);
+      setLocalSubmitted(true);
     } catch { setErr("Network error. Try again."); }
     finally { setSubmitting(false); }
-  }
-
-  if (submitted) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen px-4 text-center">
-        <div className="text-6xl mb-4">✅</div>
-        <p className="text-2xl font-bold text-green-400 mb-2">Answer submitted!</p>
-        <p className="text-gray-400">Waiting for others…</p>
-      </div>
-    );
   }
 
   return (
@@ -174,20 +174,37 @@ function PlayerVotingForm({
   alreadyVoted: boolean;
 }) {
   const [voting, setVoting] = useState(false);
-  const [voted, setVoted] = useState(alreadyVoted);
+  const [localVoted, setLocalVoted] = useState(false);
   const [err, setErr] = useState("");
 
-  useEffect(() => { if (alreadyVoted) setVoted(true); }, [alreadyVoted]);
+  // Order answers by ID for a stable, non-obvious display order.
+  // UUIDs are randomly generated so the order varies per round without Math.random().
+  const shuffled = useMemo(
+    () => answers.filter((a) => a.player_id !== me.id).sort((a, b) => a.id.localeCompare(b.id)),
+    [answers, me.id]
+  );
 
-  // Shuffle answers once, excluding own answer
-  const shuffled = useMemo(() => {
-    const votable = answers.filter((a) => a.player_id !== me.id);
-    return [...votable].sort(() => Math.random() - 0.5);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [answers.length]);
+  // Show voted confirmation if already voted (page refresh) or just voted locally
+  if (localVoted || alreadyVoted) {
+    return (
+      <SubmittedScreen
+        emoji="🗳️"
+        title="Vote cast!"
+        subtitle="Waiting for results…"
+      />
+    );
+  }
+
+  if (!myAnswer) {
+    return <WaitingBanner text="You didn't submit an answer, so you can't vote this round." />;
+  }
+
+  if (shuffled.length === 0) {
+    return <WaitingBanner text="Not enough answers to vote on this round." />;
+  }
 
   async function vote(answerId: string) {
-    if (voted || voting) return;
+    if (localVoted || voting) return;
     setVoting(true); setErr("");
     try {
       const res = await fetch(`/api/rounds/${round.id}/vote`, {
@@ -197,29 +214,9 @@ function PlayerVotingForm({
       });
       const data = await res.json();
       if (!res.ok) { setErr(data.error ?? "Failed to vote."); return; }
-      setVoted(true);
+      setLocalVoted(true);
     } catch { setErr("Network error. Try again."); }
     finally { setVoting(false); }
-  }
-
-  if (voted) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen px-4 text-center">
-        <div className="text-6xl mb-4">🗳️</div>
-        <p className="text-2xl font-bold text-pink-400 mb-2">Vote cast!</p>
-        <p className="text-gray-400">Waiting for results…</p>
-      </div>
-    );
-  }
-
-  // Player submitted no answer — they can't vote
-  if (!myAnswer) {
-    return <WaitingBanner text="You didn't submit an answer, so you can't vote this round." />;
-  }
-
-  // Edge case: only 1 player answered — nothing to vote on
-  if (shuffled.length === 0) {
-    return <WaitingBanner text="Not enough answers to vote on this round." />;
   }
 
   return (
@@ -249,7 +246,7 @@ function PlayerVotingForm({
   );
 }
 
-// ─── Results View (player) ────────────────────────────────────────────────────
+// ─── Results View ─────────────────────────────────────────────────────────────
 
 function PlayerResults({
   round,
@@ -260,7 +257,7 @@ function PlayerResults({
 }: {
   round: Round;
   answers: Answer[];
-  votes: { answer_id: string }[];
+  votes: Vote[];
   players: Player[];
   me: Player;
 }) {
@@ -279,31 +276,35 @@ function PlayerResults({
       <div className="bg-white/5 rounded-2xl p-4 mb-6 text-center">
         <p className="text-lg font-semibold text-white">{round.prompt_text}</p>
       </div>
-      <div className="flex flex-col gap-4">
-        {sorted.map((a, i) => (
-          <div
-            key={a.id}
-            className={`rounded-2xl p-4 ${i === 0 && a.voteCount > 0 ? "bg-yellow-900/40 border border-yellow-600" : "bg-white/5"} ${a.isMe ? "ring-2 ring-purple-500" : ""}`}
-          >
-            <div className="flex justify-between items-start gap-2">
-              <p className="text-white font-bold flex-1">{a.text}</p>
-              <span className={`font-black ${a.voteCount > 0 ? "text-yellow-400" : "text-gray-600"}`}>
-                {a.voteCount}v
-              </span>
+      {sorted.length === 0 ? (
+        <p className="text-gray-500 text-center py-8">No answers this round.</p>
+      ) : (
+        <div className="flex flex-col gap-4">
+          {sorted.map((a, i) => (
+            <div
+              key={a.id}
+              className={`rounded-2xl p-4 ${i === 0 && a.voteCount > 0 ? "bg-yellow-900/40 border border-yellow-600" : "bg-white/5"} ${a.isMe ? "ring-2 ring-purple-500" : ""}`}
+            >
+              <div className="flex justify-between items-start gap-2">
+                <p className="text-white font-bold flex-1">{a.text}</p>
+                <span className={`font-black ${a.voteCount > 0 ? "text-yellow-400" : "text-gray-600"}`}>
+                  {a.voteCount}v
+                </span>
+              </div>
+              <div className="flex gap-2 mt-1 text-xs">
+                <span className="text-gray-400">— {a.authorNickname}</span>
+                {a.isMe && <span className="text-purple-400">(You)</span>}
+                {a.voteCount > 0 && <span className="text-green-400">+{a.voteCount * 100} pts</span>}
+              </div>
             </div>
-            <div className="flex gap-2 mt-1 text-xs">
-              <span className="text-gray-400">— {a.authorNickname}</span>
-              {a.isMe && <span className="text-purple-400">(You)</span>}
-              {a.voteCount > 0 && <span className="text-green-400">+{a.voteCount * 100} pts</span>}
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-// ─── Leaderboard View (player) ────────────────────────────────────────────────
+// ─── Leaderboard ─────────────────────────────────────────────────────────────
 
 function PlayerLeaderboard({ players, me }: { players: Player[]; me: Player }) {
   const sorted = [...players].sort((a, b) => b.score - a.score);
@@ -313,9 +314,7 @@ function PlayerLeaderboard({ players, me }: { players: Player[]; me: Player }) {
     <div className="flex flex-col min-h-screen px-4 py-8">
       <h2 className="text-3xl font-black text-center mb-2 text-white">Leaderboard</h2>
       {myRank > 0 && (
-        <p className="text-center text-gray-400 text-sm mb-6">
-          You are #{myRank}
-        </p>
+        <p className="text-center text-gray-400 text-sm mb-6">You are #{myRank}</p>
       )}
       <div className="flex flex-col gap-3">
         {sorted.map((p, i) => (
@@ -334,7 +333,7 @@ function PlayerLeaderboard({ players, me }: { players: Player[]; me: Player }) {
   );
 }
 
-// ─── Game Over (player) ───────────────────────────────────────────────────────
+// ─── Game Over ────────────────────────────────────────────────────────────────
 
 function PlayerGameOver({ players, me }: { players: Player[]; me: Player }) {
   const sorted = [...players].sort((a, b) => b.score - a.score);
@@ -373,44 +372,38 @@ export default function PlayPage() {
 
   const { room, players, currentRound, answers, votes, loading, error } = useGameRoom(code);
 
-  const [me, setMe] = useState<Player | null>(null);
-  const [identityError, setIdentityError] = useState("");
+  // Read from sessionStorage once — stable for the component's lifetime
+  const [playerId] = useState<string | null>(() =>
+    typeof window !== "undefined" ? sessionStorage.getItem("playerId") : null
+  );
 
-  // Load player identity from sessionStorage
+  // Derive me directly from players — no effect, no setState
+  const me = useMemo(
+    () => (playerId ? (players.find((p) => p.id === playerId) ?? null) : null),
+    [players, playerId]
+  );
+
+  // Redirect on missing session or when players have loaded and we're not in the active list
   useEffect(() => {
-    const id = sessionStorage.getItem("playerId");
-    const nick = sessionStorage.getItem("playerNickname");
-    if (!id || !nick) {
-      // No identity — redirect home with code pre-filled
+    const nick = typeof window !== "undefined" ? sessionStorage.getItem("playerNickname") : null;
+    if (!playerId || !nick) {
+      router.replace(`/?code=${code}`);
+      return;
+    }
+    if (!loading && me === null) {
+      sessionStorage.removeItem("playerId");
+      sessionStorage.removeItem("playerNickname");
       router.replace(`/?code=${code}`);
     }
-  }, [code, router]);
-
-  // Once players list loads, find "me"
-  useEffect(() => {
-    const id = sessionStorage.getItem("playerId");
-    if (!id || !players.length) return;
-    const found = players.find((p) => p.id === id);
-    if (found) {
-      setMe(found);
-    } else {
-      // May have been removed by host, or players not yet loaded
-      setIdentityError("You were removed from the game.");
-    }
-  }, [players]);
+  }, [playerId, loading, me, code, router]);
 
   if (loading) return <Spinner />;
   if (error) return <ErrorCard message={error} />;
-  if (identityError) return <ErrorCard message={identityError} />;
   if (!room) return null;
   if (!me) return <Spinner />;
 
-  const myAnswer = currentRound
-    ? answers.find((a) => a.player_id === me.id)
-    : undefined;
-  const myVote = currentRound
-    ? votes.find((v) => v.voter_id === me.id)
-    : undefined;
+  const myAnswer = currentRound ? answers.find((a) => a.player_id === me.id) : undefined;
+  const myVote = currentRound ? votes.find((v) => v.voter_id === me.id) : undefined;
 
   switch (room.state) {
     case "lobby":
@@ -419,11 +412,7 @@ export default function PlayPage() {
     case "answer_submission":
       if (!currentRound) return <WaitingBanner text="Round starting…" />;
       return (
-        <PlayerAnswerForm
-          round={currentRound}
-          me={me}
-          existingAnswer={myAnswer}
-        />
+        <PlayerAnswerForm round={currentRound} me={me} existingAnswer={myAnswer} />
       );
 
     case "voting":
