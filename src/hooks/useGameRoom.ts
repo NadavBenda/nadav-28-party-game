@@ -12,7 +12,6 @@ export interface GameRoomState {
   votes: Vote[];
   loading: boolean;
   error: string | null;
-  refetch: () => Promise<void>;
 }
 
 export function useGameRoom(code: string): GameRoomState {
@@ -93,10 +92,6 @@ export function useGameRoom(code: string): GameRoomState {
     },
     [supabase, fetchAnswersAndVotes]
   );
-
-  const refetch = useCallback(async () => {
-    if (roomIdRef.current) await fetchPlayersAndRound(roomIdRef.current);
-  }, [fetchPlayersAndRound]);
 
   // ── Initial load ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -195,5 +190,5 @@ export function useGameRoom(code: string): GameRoomState {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentRound?.id]);
 
-  return { room, players, currentRound, answers, votes, loading, error, refetch };
+  return { room, players, currentRound, answers, votes, loading, error };
 }

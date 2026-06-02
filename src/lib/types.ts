@@ -62,12 +62,3 @@ export interface Vote {
   submitted_at: string;
 }
 
-// Enriched types used in UI
-export interface AnswerWithVotes extends Answer {
-  vote_count: number;
-  player_nickname: string;
-}
-
-export interface PlayerWithRank extends Player {
-  rank: number;
-}

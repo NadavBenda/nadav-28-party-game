@@ -36,9 +36,9 @@ export async function POST(
 
     const cleanPrompts = (prompts as unknown[])
       .filter((p): p is string => typeof p === "string")
-      .map((p) => p.trim())
+      .map((p) => p.trim().slice(0, 280))
       .filter(Boolean)
-      .slice(0, 100); // cap at 100
+      .slice(0, 100); // cap at 100 prompts, 280 chars each
 
     if (!cleanPrompts.length) {
       return NextResponse.json({ error: "No valid prompts." }, { status: 400 });

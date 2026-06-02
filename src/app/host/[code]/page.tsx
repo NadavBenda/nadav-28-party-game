@@ -671,11 +671,18 @@ export default function HostPage() {
   const code = (params.code as string).toUpperCase();
   const { room, players, currentRound, answers, votes, loading, error } = useGameRoom(code);
 
-  // Initialize pin from sessionStorage so the host doesn't re-enter it after a refresh
-  const [pin, setPin] = useState(() =>
-    typeof window !== "undefined" ? (sessionStorage.getItem("hostPin") ?? "") : ""
-  );
+  const [pin, setPin] = useState("");
   const [showAdmin, setShowAdmin] = useState(false);
+
+  // Restore PIN from sessionStorage after hydration so the host doesn't re-enter on page reload
+  useEffect(() => {
+    async function restore() {
+      await Promise.resolve(); // defer past synchronous render cycle
+      const stored = sessionStorage.getItem("hostPin");
+      if (stored) setPin(stored);
+    }
+    void restore();
+  }, []);
 
   // pinVerified is derived — it becomes true once room loads and pin matches
   const pinVerified = pin !== "" && room !== null && pin === room.host_pin;
