@@ -10,16 +10,64 @@
   --color-foreground: var(--foreground);
 }
 
+/* ── Base ───────────────────────────────────────────────────────────────── */
+
+html {
+  /* Prevent rubber-band overscroll on iOS showing white edges */
+  background: #0f0f1a;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: system-ui, -apple-system, sans-serif;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
   -webkit-font-smoothing: antialiased;
+  /* Prevent iOS font size adjustment in landscape */
+  -webkit-text-size-adjust: 100%;
 }
 
-/* Auto-detect RTL characters (Hebrew support) in text inputs */
+/* ── RTL / Hebrew support ───────────────────────────────────────────────── */
+
+/* Auto-detect RTL characters (Hebrew) in text inputs */
 input.auto-dir,
 textarea.auto-dir {
   unicode-bidi: plaintext;
   direction: auto;
+}
+
+/* ── Touch targets ──────────────────────────────────────────────────────── */
+
+/* Ensure tap targets are ≥ 44px tall on mobile */
+button, a {
+  min-height: 44px;
+}
+
+/* ── Focus styles ───────────────────────────────────────────────────────── */
+
+:focus-visible {
+  outline: 2px solid #a78bfa;
+  outline-offset: 2px;
+}
+
+/* ── Scrollbar (Chrome/Edge) ────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+
+/* ── Pulse animation for waiting screens ────────────────────────────────── */
+
+@keyframes pulse-slow {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.animate-pulse-slow {
+  animation: pulse-slow 2s ease-in-out infinite;
 }
