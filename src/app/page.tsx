@@ -8,13 +8,11 @@ function HomePageContent() {
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<"join" | "create">("join");
 
-  // Join form — pre-fill code from ?code= query param if present
   const [joinCode, setJoinCode] = useState(() => searchParams.get("code")?.toUpperCase() ?? "");
   const [nickname, setNickname] = useState("");
   const [joinError, setJoinError] = useState("");
   const [joinLoading, setJoinLoading] = useState(false);
 
-  // Create form
   const [hostPin, setHostPin] = useState("");
   const [createError, setCreateError] = useState("");
   const [createLoading, setCreateLoading] = useState(false);
@@ -78,46 +76,42 @@ function HomePageContent() {
   }
 
   return (
-    <main className="flex-1 flex flex-col items-center justify-center px-4 py-10 min-h-screen">
-      {/* Title */}
-      <div className="mb-8 text-center select-none">
-        <h1 className="text-5xl font-black tracking-tight bg-gradient-to-r from-purple-400 via-pink-400 to-yellow-400 bg-clip-text text-transparent">
+    <main className="flex-1 flex flex-col items-center justify-center px-4 py-12 min-h-screen">
+
+      {/* Hero */}
+      <div className="mb-10 text-center select-none animate-slide-up">
+        <div className="text-6xl mb-3">🎂</div>
+        <h1 className="text-5xl sm:text-6xl font-black tracking-tight text-gradient-party mb-2">
           Party Game
         </h1>
-        <p className="mt-2 text-gray-500 text-sm">
-          Quiplash-style · Made for Nadav&apos;s birthday 🎂
+        <p className="text-indigo-300/70 text-base font-medium">
+          Nadav&apos;s 28th Birthday&nbsp;·&nbsp;Quiplash-style
         </p>
       </div>
 
-      <div className="w-full max-w-sm">
+      <div className="w-full max-w-sm animate-slide-up-1">
+
         {/* Tab switcher */}
-        <div className="flex rounded-xl overflow-hidden border border-white/10 mb-6">
-          <button
-            onClick={() => setTab("join")}
-            className={`flex-1 py-3 text-sm font-bold transition-colors ${
-              tab === "join"
-                ? "bg-purple-600 text-white"
-                : "bg-white/5 text-gray-400 hover:bg-white/10"
-            }`}
-          >
-            Join a Room
-          </button>
-          <button
-            onClick={() => setTab("create")}
-            className={`flex-1 py-3 text-sm font-bold transition-colors ${
-              tab === "create"
-                ? "bg-purple-600 text-white"
-                : "bg-white/5 text-gray-400 hover:bg-white/10"
-            }`}
-          >
-            Create Room (Host)
-          </button>
+        <div className="flex rounded-2xl overflow-hidden glass mb-6 p-1 gap-1">
+          {(["join", "create"] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`flex-1 py-3 rounded-xl text-sm font-bold transition-all ${
+                tab === t
+                  ? "bg-purple-600 text-white shadow-lg"
+                  : "text-gray-400 hover:text-gray-200"
+              }`}
+            >
+              {t === "join" ? "Join a Room" : "Create Room"}
+            </button>
+          ))}
         </div>
 
         {tab === "join" ? (
           <form onSubmit={handleJoin} className="flex flex-col gap-4">
-            <div>
-              <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">
+            <div className="animate-slide-up-1">
+              <label className="block text-xs font-bold text-indigo-300/70 uppercase tracking-widest mb-2">
                 Room Code
               </label>
               <input
@@ -130,62 +124,66 @@ function HomePageContent() {
                 autoCorrect="off"
                 spellCheck={false}
                 inputMode="text"
-                className="w-full px-4 py-4 rounded-xl bg-white/10 border border-white/20 text-white text-center text-3xl font-black tracking-widest placeholder-gray-700 focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/30"
+                className="w-full px-4 py-4 rounded-2xl glass text-white text-center text-4xl font-black tracking-widest placeholder-white/20 focus:outline-none focus:border-purple-500/60 focus:ring-2 focus:ring-purple-500/30 transition-all"
               />
             </div>
-            <div>
-              <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">
+            <div className="animate-slide-up-2">
+              <label className="block text-xs font-bold text-indigo-300/70 uppercase tracking-widest mb-2">
                 Your Nickname
               </label>
               <input
                 type="text"
                 value={nickname}
                 onChange={(e) => setNickname(e.target.value)}
-                placeholder="Moshe"
+                placeholder="Enter your name"
                 maxLength={20}
                 autoCorrect="off"
-                className="auto-dir w-full px-4 py-4 rounded-xl bg-white/10 border border-white/20 text-white text-xl placeholder-gray-700 focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/30"
+                className="auto-dir w-full px-4 py-4 rounded-2xl glass text-white text-xl placeholder-white/20 focus:outline-none focus:border-purple-500/60 focus:ring-2 focus:ring-purple-500/30 transition-all"
               />
             </div>
             {joinError && (
-              <p className="text-red-400 text-sm text-center" role="alert">{joinError}</p>
+              <p className="text-rose-400 text-sm text-center font-medium animate-slide-up" role="alert">
+                {joinError}
+              </p>
             )}
             <button
               type="submit"
               disabled={joinLoading}
-              className="mt-1 w-full py-5 rounded-xl bg-purple-600 hover:bg-purple-500 active:scale-95 text-white text-xl font-black transition-all disabled:opacity-50"
+              className="btn btn-purple w-full py-5 text-xl rounded-2xl animate-slide-up-3"
             >
-              {joinLoading ? "Joining…" : "Join Game"}
+              {joinLoading ? "Joining…" : "Join Game 🎉"}
             </button>
           </form>
         ) : (
           <form onSubmit={handleCreate} className="flex flex-col gap-4">
-            <div>
-              <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider mb-1">
+            <div className="animate-slide-up-1">
+              <label className="block text-xs font-bold text-indigo-300/70 uppercase tracking-widest mb-2">
                 Host PIN
               </label>
               <input
                 type="text"
                 value={hostPin}
                 onChange={(e) => setHostPin(e.target.value)}
-                placeholder="Choose a PIN (≥4 chars)"
+                placeholder="Choose a PIN (≥ 4 chars)"
                 maxLength={20}
                 autoCorrect="off"
-                className="w-full px-4 py-4 rounded-xl bg-white/10 border border-white/20 text-white text-xl placeholder-gray-700 focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-500/30"
+                className="w-full px-4 py-4 rounded-2xl glass text-white text-xl placeholder-white/20 focus:outline-none focus:border-purple-500/60 focus:ring-2 focus:ring-purple-500/30 transition-all"
               />
-              <p className="mt-1 text-xs text-gray-600">
+              <p className="mt-2 text-xs text-white/30 text-center">
                 You&apos;ll need this PIN to control the game from the host screen.
               </p>
             </div>
             {createError && (
-              <p className="text-red-400 text-sm text-center" role="alert">{createError}</p>
+              <p className="text-rose-400 text-sm text-center font-medium animate-slide-up" role="alert">
+                {createError}
+              </p>
             )}
             <button
               type="submit"
               disabled={createLoading}
-              className="mt-1 w-full py-5 rounded-xl bg-pink-600 hover:bg-pink-500 active:scale-95 text-white text-xl font-black transition-all disabled:opacity-50"
+              className="btn btn-purple w-full py-5 text-xl rounded-2xl animate-slide-up-2"
             >
-              {createLoading ? "Creating…" : "Create Room"}
+              {createLoading ? "Creating…" : "Create Room 🎮"}
             </button>
           </form>
         )}
@@ -196,7 +194,11 @@ function HomePageContent() {
 
 export default function HomePage() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-gray-400">Loading…</div>}>
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="w-10 h-10 rounded-full border-4 border-purple-500/30 border-t-purple-500 animate-spin-game" />
+      </div>
+    }>
       <HomePageContent />
     </Suspense>
   );
