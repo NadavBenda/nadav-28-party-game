@@ -538,21 +538,32 @@ export default function PlayPage() {
 
   const { room, players, currentRound, answers, votes, loading, error } = useGameRoom(code);
 
-  const [playerId] = useState<string | null>(() =>
-    typeof window !== "undefined" ? sessionStorage.getItem("playerId") : null
-  );
+  // SSR-safe: sessionStorage is unavailable on the server, so read it
+  // asynchronously after mount (same pattern used for hostPin in host page).
+  const [playerId, setPlayerId] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function restoreIdentity() {
+      await Promise.resolve();
+      const id = sessionStorage.getItem("playerId");
+      const nick = sessionStorage.getItem("playerNickname");
+      if (!id || !nick) {
+        router.replace(`/?code=${code}`);
+        return;
+      }
+      setPlayerId(id);
+    }
+    void restoreIdentity();
+  }, [code, router]);
 
   const me = useMemo(
     () => (playerId ? (players.find((p) => p.id === playerId) ?? null) : null),
     [players, playerId]
   );
 
+  // Redirect if the player was removed from the room after identity is known.
   useEffect(() => {
-    const nick = typeof window !== "undefined" ? sessionStorage.getItem("playerNickname") : null;
-    if (!playerId || !nick) {
-      router.replace(`/?code=${code}`);
-      return;
-    }
+    if (!playerId) return;
     if (!loading && me === null) {
       sessionStorage.removeItem("playerId");
       sessionStorage.removeItem("playerNickname");
