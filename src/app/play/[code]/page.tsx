@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useGameRoom } from "@/hooks/useGameRoom";
+import { MAX_VOTES_PER_PLAYER } from "@/lib/config";
 import type { Room, Player, Round, Answer, Vote } from "@/lib/types";
 
 // ─── Shared UI ────────────────────────────────────────────────────────────────
@@ -115,7 +116,7 @@ function PlayerLobby({ room, players, me }: { room: Room; players: Player[]; me:
               }`}
             >
               <div className={`w-2 h-2 rounded-full flex-shrink-0 ${p.id === me.id ? "bg-purple-400" : "bg-white/20"}`} />
-              <span className="text-white font-semibold text-sm flex-1 text-left">{p.nickname}</span>
+              <span className="text-white font-semibold text-sm flex-1 text-left auto-dir" dir="auto">{p.nickname}</span>
               {p.id === me.id && (
                 <span className="text-xs text-purple-300 font-bold">You</span>
               )}
@@ -193,21 +194,19 @@ function PlayerAnswerForm({
     <div className="flex flex-col min-h-screen px-4 py-8">
       <div className="flex-1 flex flex-col justify-center gap-5 max-w-lg mx-auto w-full">
 
-        {/* Round badge */}
         <div className="flex justify-center animate-slide-up">
           <span className="glass px-4 py-1.5 rounded-full text-xs font-bold text-purple-300 uppercase tracking-widest">
             Round {round.round_number}
           </span>
         </div>
 
-        {/* Prompt card */}
+        {/* Prompt — dir="auto" ensures Hebrew punctuation is placed correctly */}
         <div className="glass rounded-3xl p-6 animate-slide-up-1" style={{ borderColor: 'rgba(139,92,246,0.25)' }}>
-          <p className="text-2xl font-black text-white text-center leading-snug auto-dir">
+          <p className="text-2xl font-black text-white text-center leading-snug auto-dir" dir="auto">
             {round.prompt_text}
           </p>
         </div>
 
-        {/* Answer form */}
         <form onSubmit={submit} className="flex flex-col gap-3 animate-slide-up-2">
           <div className="relative">
             <textarea
@@ -244,36 +243,37 @@ function PlayerVotingForm({
   me,
   answers,
   myAnswer,
-  alreadyVoted,
+  myVotes,
 }: {
   round: Round;
   me: Player;
   answers: Answer[];
   myAnswer: Answer | undefined;
-  alreadyVoted: boolean;
+  myVotes: Vote[];
 }) {
-  const [voting, setVoting] = useState(false);
-  const [localVoted, setLocalVoted] = useState(false);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [pending, setPending] = useState<string | null>(null);
   const [err, setErr] = useState("");
+
+  const votedAnswerIds = useMemo(() => new Set(myVotes.map((v) => v.answer_id)), [myVotes]);
+  const votesLeft = MAX_VOTES_PER_PLAYER - myVotes.length;
 
   const shuffled = useMemo(
     () => answers.filter((a) => a.player_id !== me.id).sort((a, b) => a.id.localeCompare(b.id)),
     [answers, me.id]
   );
 
-  if (localVoted || alreadyVoted) {
+  if (votesLeft <= 0) {
     return (
       <SubmittedScreen
         emoji="🗳️"
-        title="Vote cast!"
+        title={`${MAX_VOTES_PER_PLAYER} votes cast!`}
         subtitle="Waiting for results…"
       />
     );
   }
 
   if (!myAnswer) {
-    return <WaitingBanner text="You didn't submit an answer, so you can't vote this round." />;
+    return <WaitingBanner text="You didn't submit an answer this round, so you can't vote." />;
   }
 
   if (shuffled.length === 0) {
@@ -281,9 +281,9 @@ function PlayerVotingForm({
   }
 
   async function vote(answerId: string) {
-    if (localVoted || voting) return;
-    setSelected(answerId);
-    setVoting(true); setErr("");
+    if (pending || votedAnswerIds.has(answerId)) return;
+    setPending(answerId);
+    setErr("");
     try {
       const res = await fetch(`/api/rounds/${round.id}/vote`, {
         method: "POST",
@@ -291,58 +291,73 @@ function PlayerVotingForm({
         body: JSON.stringify({ voterId: me.id, answerId }),
       });
       const data = await res.json();
-      if (!res.ok) { setSelected(null); setErr(data.error ?? "Failed to vote."); return; }
-      setLocalVoted(true);
-    } catch { setSelected(null); setErr("Network error. Try again."); }
-    finally { setVoting(false); }
+      if (!res.ok) setErr(data.error ?? "Failed to vote.");
+    } catch { setErr("Network error. Try again."); }
+    finally { setPending(null); }
   }
 
   const letterLabels = ["A", "B", "C", "D", "E", "F", "G", "H"];
 
   return (
     <div className="flex flex-col min-h-screen px-4 py-8">
-      <div className="max-w-lg mx-auto w-full flex flex-col gap-5 flex-1">
+      <div className="max-w-lg mx-auto w-full flex flex-col gap-4 flex-1">
 
-        {/* Header */}
-        <div className="flex justify-center animate-slide-up">
-          <span className="glass px-4 py-1.5 rounded-full text-xs font-bold text-pink-300 uppercase tracking-widest">
-            Vote
-          </span>
+        {/* Votes remaining pips */}
+        <div className="flex flex-col items-center gap-2 animate-slide-up">
+          <div className="flex gap-2">
+            {Array.from({ length: MAX_VOTES_PER_PLAYER }).map((_, i) => (
+              <div
+                key={i}
+                className={`w-3.5 h-3.5 rounded-full transition-all duration-300 ${
+                  i < myVotes.length ? "bg-purple-500 scale-110" : "bg-white/20"
+                }`}
+              />
+            ))}
+          </div>
+          <p className="text-white/50 text-sm font-bold">
+            {votesLeft} vote{votesLeft !== 1 ? "s" : ""} remaining
+          </p>
         </div>
 
         {/* Prompt */}
         <div className="glass rounded-3xl p-5 text-center animate-slide-up-1">
-          <p className="text-lg font-bold text-white leading-snug auto-dir">{round.prompt_text}</p>
+          <p className="text-lg font-bold text-white leading-snug auto-dir" dir="auto">
+            {round.prompt_text}
+          </p>
         </div>
-
-        <p className="text-white/40 text-sm text-center animate-slide-up-2">
-          Tap the answer you like best ↓
-        </p>
 
         {/* Answer cards */}
         <div className="flex flex-col gap-3 flex-1 stagger">
           {shuffled.map((a, i) => {
-            const isSelected = selected === a.id;
+            const hasVoted = votedAnswerIds.has(a.id);
+            const isPending = pending === a.id;
             return (
               <button
                 key={a.id}
                 onClick={() => vote(a.id)}
-                disabled={voting}
-                className={`w-full text-left p-5 rounded-2xl transition-all duration-200 active:scale-[0.97] disabled:opacity-60 ${
-                  isSelected
-                    ? "bg-purple-600/50 border border-purple-400/70 shadow-lg shadow-purple-900/30"
+                disabled={isPending}
+                className={`w-full text-left p-5 rounded-2xl transition-all duration-200 active:scale-[0.97] ${
+                  hasVoted
+                    ? "bg-emerald-700/30 border border-emerald-400/50"
+                    : isPending
+                    ? "bg-purple-600/40 border border-purple-400/60"
                     : "glass hover:bg-purple-700/20 hover:border-purple-500/30"
                 }`}
               >
                 <div className="flex items-start gap-3">
                   <span className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-black ${
-                    isSelected ? 'bg-purple-400 text-white' : 'bg-white/10 text-white/40'
+                    hasVoted ? "bg-emerald-400 text-black" :
+                    isPending ? "bg-purple-400 text-white" :
+                    "bg-white/10 text-white/40"
                   }`}>
-                    {letterLabels[i] ?? i + 1}
+                    {hasVoted ? "✓" : (letterLabels[i] ?? i + 1)}
                   </span>
-                  <span className="text-white text-base font-semibold leading-snug flex-1 auto-dir">
+                  <span className="text-white text-base font-semibold leading-snug flex-1 auto-dir" dir="auto">
                     {a.text}
                   </span>
+                  {hasVoted && (
+                    <span className="text-emerald-400 text-xs font-black flex-shrink-0">Voted!</span>
+                  )}
                 </div>
               </button>
             );
@@ -350,6 +365,9 @@ function PlayerVotingForm({
         </div>
 
         {err && <p className="text-rose-400 text-sm text-center font-medium">{err}</p>}
+        <p className="text-center text-white/25 text-xs pb-2">
+          Tap to vote · You can spread votes across multiple answers
+        </p>
       </div>
     </div>
   );
@@ -390,43 +408,52 @@ function PlayerResults({
         </div>
 
         <div className="glass rounded-3xl p-5 text-center animate-slide-up-1">
-          <p className="text-lg font-bold text-white leading-snug auto-dir">{round.prompt_text}</p>
+          <p className="text-lg font-bold text-white leading-snug auto-dir" dir="auto">
+            {round.prompt_text}
+          </p>
         </div>
 
         {sorted.length === 0 ? (
           <p className="text-white/30 text-center py-8">No answers this round.</p>
         ) : (
           <div className="flex flex-col gap-3 stagger">
-            {sorted.map((a, i) => (
-              <div
-                key={a.id}
-                className={`rounded-2xl p-4 transition-all ${
-                  i === 0 && a.voteCount > 0
-                    ? "winner-card animate-gold-glow"
-                    : "glass"
-                } ${a.isMe ? "ring-2 ring-purple-500/50" : ""}`}
-              >
-                {i === 0 && a.voteCount > 0 && (
-                  <div className="text-xs text-amber-400 font-black uppercase tracking-widest mb-2">
-                    🏆 Winner
-                  </div>
-                )}
-                <div className="flex justify-between items-start gap-3">
-                  <p className="text-white font-bold text-base flex-1 leading-snug auto-dir">{a.text}</p>
-                  <span className={`text-xl font-black flex-shrink-0 ${a.voteCount > 0 ? "text-gradient-gold" : "text-white/20"}`}>
-                    {a.voteCount}
-                    <span className="text-sm font-bold"> {a.voteCount === 1 ? "vote" : "votes"}</span>
-                  </span>
-                </div>
-                <div className="flex items-center gap-3 mt-2 flex-wrap">
-                  <span className="text-white/40 text-xs">— {a.authorNickname}</span>
-                  {a.isMe && <span className="text-xs text-purple-400 font-bold">you</span>}
-                  {a.voteCount > 0 && (
-                    <span className="text-xs text-emerald-400 font-bold">+{a.voteCount * 100} pts</span>
+            {sorted.map((a, i) => {
+              const isWinner = i === 0 && a.voteCount > 0;
+              return (
+                <div
+                  key={a.id}
+                  className={`rounded-2xl p-4 transition-all ${
+                    isWinner ? "winner-card animate-gold-glow" : "glass"
+                  } ${a.isMe ? "ring-2 ring-purple-500/50" : ""}`}
+                >
+                  {isWinner && (
+                    <div className="text-xs text-amber-400 font-black uppercase tracking-widest mb-2">
+                      🏆 Winner
+                    </div>
                   )}
+                  <div className="flex justify-between items-start gap-3">
+                    <p className="text-white font-bold text-base flex-1 leading-snug auto-dir" dir="auto">
+                      {a.text}
+                    </p>
+                    <div className="text-right flex-shrink-0">
+                      <span className={`text-2xl font-black ${a.voteCount > 0 ? "text-gradient-gold animate-score-slam" : "text-white/20"}`}>
+                        {a.voteCount}
+                      </span>
+                      <p className="text-xs text-white/30">
+                        {a.voteCount === 1 ? "vote" : "votes"}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 mt-2 flex-wrap">
+                    <span className="text-white/40 text-xs auto-dir" dir="auto">— {a.authorNickname}</span>
+                    {a.isMe && <span className="text-xs text-purple-400 font-bold">you</span>}
+                    {a.voteCount > 0 && (
+                      <span className="text-xs text-emerald-400 font-bold">+{a.voteCount * 100} pts</span>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -440,7 +467,7 @@ const RANK_MEDAL = ["🥇", "🥈", "🥉"];
 const RANK_CLASS = ["rank-gold", "rank-silver", "rank-bronze"];
 
 function PlayerLeaderboard({ players, me }: { players: Player[]; me: Player }) {
-  const sorted = [...players].sort((a, b) => b.score - a.score);
+  const sorted = useMemo(() => [...players].sort((a, b) => b.score - a.score), [players]);
   const myRank = sorted.findIndex((p) => p.id === me.id) + 1;
 
   return (
@@ -467,7 +494,7 @@ function PlayerLeaderboard({ players, me }: { players: Player[]; me: Player }) {
               <span className="text-xl w-8 flex-shrink-0 text-center">
                 {i < 3 ? RANK_MEDAL[i] : <span className="text-white/30 font-bold text-base">{i + 1}</span>}
               </span>
-              <span className="text-white font-bold flex-1 truncate">{p.nickname}</span>
+              <span className="text-white font-bold flex-1 truncate auto-dir" dir="auto">{p.nickname}</span>
               {p.id === me.id && (
                 <span className="text-xs text-purple-300 font-bold flex-shrink-0">You</span>
               )}
@@ -483,7 +510,7 @@ function PlayerLeaderboard({ players, me }: { players: Player[]; me: Player }) {
 // ─── Game Over ────────────────────────────────────────────────────────────────
 
 function PlayerGameOver({ players, me }: { players: Player[]; me: Player }) {
-  const sorted = [...players].sort((a, b) => b.score - a.score);
+  const sorted = useMemo(() => [...players].sort((a, b) => b.score - a.score), [players]);
   const winner = sorted[0];
   const iWon = winner?.id === me.id;
 
@@ -494,7 +521,7 @@ function PlayerGameOver({ players, me }: { players: Player[]; me: Player }) {
       <div className="animate-pop text-8xl mb-4">{iWon ? "🏆" : "🎉"}</div>
 
       <div className="animate-slide-up-1 mb-8">
-        <h1 className="text-4xl font-black text-gradient-gold mb-1">
+        <h1 className="text-4xl font-black text-gradient-gold mb-1 auto-dir" dir="auto">
           {winner?.nickname ?? "Nobody"} wins!
         </h1>
         <p className="text-white/40 text-base">{winner?.score ?? 0} points</p>
@@ -516,7 +543,7 @@ function PlayerGameOver({ players, me }: { players: Player[]; me: Player }) {
             <span className="text-lg w-6 text-center">
               {i < 3 ? RANK_MEDAL[i] : <span className="text-white/30 text-sm font-bold">{i + 1}</span>}
             </span>
-            <span className="text-white flex-1 font-semibold text-sm">{p.nickname}</span>
+            <span className="text-white flex-1 font-semibold text-sm auto-dir" dir="auto">{p.nickname}</span>
             <span className="text-gradient-gold font-black">{p.score}</span>
           </div>
         ))}
@@ -538,8 +565,6 @@ export default function PlayPage() {
 
   const { room, players, currentRound, answers, votes, loading, error } = useGameRoom(code);
 
-  // SSR-safe: sessionStorage is unavailable on the server, so read it
-  // asynchronously after mount (same pattern used for hostPin in host page).
   const [playerId, setPlayerId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -561,7 +586,6 @@ export default function PlayPage() {
     [players, playerId]
   );
 
-  // Redirect if the player was removed from the room after identity is known.
   useEffect(() => {
     if (!playerId) return;
     if (!loading && me === null) {
@@ -577,7 +601,7 @@ export default function PlayPage() {
   if (!me)     return <Spinner />;
 
   const myAnswer = currentRound ? answers.find((a) => a.player_id === me.id) : undefined;
-  const myVote   = currentRound ? votes.find((v)   => v.voter_id   === me.id) : undefined;
+  const myVotes  = currentRound ? votes.filter((v) => v.voter_id === me.id) : [];
 
   switch (room.state) {
     case "lobby":
@@ -595,7 +619,7 @@ export default function PlayPage() {
           me={me}
           answers={answers}
           myAnswer={myAnswer}
-          alreadyVoted={!!myVote}
+          myVotes={myVotes}
         />
       );
 

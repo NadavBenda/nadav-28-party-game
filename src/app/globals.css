@@ -27,8 +27,9 @@ body {
 
 /* ── RTL / Hebrew support ───────────────────────────────────────────────── */
 
-input.auto-dir,
-textarea.auto-dir {
+/* Applied to ALL elements (not just inputs) so Hebrew punctuation is placed
+   correctly in prompts, answer cards, and any user-generated text. */
+.auto-dir {
   unicode-bidi: plaintext;
   direction: auto;
 }
@@ -124,6 +125,30 @@ button, a {
   50%       { opacity: 0.55; }
 }
 
+/* Dramatic Kahoot-style reveal — big elastic pop from below */
+@keyframes reveal-pop {
+  0%   { transform: scale(0.3) translateY(80px);  opacity: 0; }
+  55%  { transform: scale(1.18) translateY(-12px); opacity: 1; }
+  72%  { transform: scale(0.94) translateY(6px); }
+  86%  { transform: scale(1.05) translateY(-3px); }
+  100% { transform: scale(1) translateY(0);        opacity: 1; }
+}
+
+/* Flash ring for newly revealed rank card */
+@keyframes rank-flash {
+  0%   { box-shadow: 0 0 0px rgba(255,255,255,0); }
+  30%  { box-shadow: 0 0 60px rgba(255,255,255,0.6), 0 0 120px rgba(255,255,255,0.3); }
+  100% { box-shadow: 0 0 0px rgba(255,255,255,0); }
+}
+
+/* Score number slam-in */
+@keyframes score-slam {
+  0%   { transform: scale(2.5); opacity: 0; filter: blur(4px); }
+  60%  { transform: scale(0.9); opacity: 1; filter: blur(0); }
+  80%  { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    UTILITY CLASSES
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -144,6 +169,9 @@ button, a {
 .animate-confetti     { animation: confetti-fall linear infinite; }
 .animate-card-in      { animation: card-in     0.35s ease-out both; }
 .animate-pulse-slow   { animation: pulse-slow  2s ease-in-out infinite; }
+.animate-reveal-pop   { animation: reveal-pop  0.75s cubic-bezier(0.34,1.56,0.64,1) both; }
+.animate-rank-flash   { animation: rank-flash  0.9s ease-out both; }
+.animate-score-slam   { animation: score-slam  0.55s cubic-bezier(0.22,1,0.36,1) both; }
 
 /* Staggered entrance for list items */
 .stagger > *:nth-child(1)  { animation: card-in 0.35s ease-out 0.00s both; }

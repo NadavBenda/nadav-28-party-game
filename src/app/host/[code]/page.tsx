@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useParams } from "next/navigation";
 import { useGameRoom } from "@/hooks/useGameRoom";
 import { createClient } from "@/lib/supabase/client";
+import { MAX_VOTES_PER_PLAYER } from "@/lib/config";
 import type { Room, Player } from "@/lib/types";
 
 // ─── Shared UI ────────────────────────────────────────────────────────────────
@@ -181,7 +182,6 @@ function HostLobby({ room, players, pin }: { room: Room; players: Player[]; pin:
   return (
     <div className="min-h-screen flex flex-col p-6 md:p-10 max-w-5xl mx-auto w-full gap-8">
 
-      {/* Room code hero */}
       <div className="text-center animate-slide-up pt-4">
         <p className="text-white/30 text-xs font-bold uppercase tracking-[0.3em] mb-3">
           Room Code — share this with players
@@ -196,10 +196,8 @@ function HostLobby({ room, players, pin }: { room: Room; players: Player[]; pin:
         </p>
       </div>
 
-      {/* Two-column grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 flex-1">
 
-        {/* Player list */}
         <div className="glass rounded-3xl p-6 animate-slide-up-1">
           <div className="flex items-center gap-3 mb-5">
             <span className="text-2xl">👥</span>
@@ -225,7 +223,7 @@ function HostLobby({ room, players, pin }: { room: Room; players: Player[]; pin:
                   className="flex items-center gap-3 bg-white/5 rounded-2xl px-4 py-2.5"
                 >
                   <div className="w-2 h-2 bg-green-400 rounded-full flex-shrink-0 animate-pulse-slow" />
-                  <span className="text-white font-semibold text-sm">{p.nickname}</span>
+                  <span className="text-white font-semibold text-sm auto-dir" dir="auto">{p.nickname}</span>
                 </li>
               ))}
             </ul>
@@ -237,7 +235,6 @@ function HostLobby({ room, players, pin }: { room: Room; players: Player[]; pin:
           )}
         </div>
 
-        {/* Prompt import */}
         <div className="glass rounded-3xl p-6 animate-slide-up-2">
           <div className="flex items-center gap-3 mb-5">
             <span className="text-2xl">📝</span>
@@ -273,7 +270,6 @@ function HostLobby({ room, players, pin }: { room: Room; players: Player[]; pin:
         </div>
       </div>
 
-      {/* Start button */}
       <div className="text-center pb-4 animate-slide-up-3">
         {startError && <p className="text-rose-400 text-sm font-medium mb-4">{startError}</p>}
         <button
@@ -337,14 +333,12 @@ function HostAnswerPhase({
         </span>
       </div>
 
-      {/* Prompt */}
       <div className="glass rounded-3xl p-8 text-center w-full animate-slide-up-1" style={{ borderColor: 'rgba(139,92,246,0.2)' }}>
-        <p className="text-4xl font-black text-white leading-tight auto-dir">
+        <p className="text-4xl font-black text-white leading-tight auto-dir" dir="auto">
           {currentRound.prompt_text}
         </p>
       </div>
 
-      {/* Progress */}
       <div className="glass rounded-3xl p-6 w-full animate-slide-up-2">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-base font-bold text-white/60">Answers received</h2>
@@ -355,10 +349,7 @@ function HostAnswerPhase({
         <div className="w-full h-3 bg-white/8 rounded-full overflow-hidden">
           <div
             className="h-full rounded-full transition-all duration-700"
-            style={{
-              width: `${pct}%`,
-              background: 'linear-gradient(90deg, #7c3aed, #4f46e5)',
-            }}
+            style={{ width: `${pct}%`, background: 'linear-gradient(90deg, #7c3aed, #4f46e5)' }}
           />
         </div>
         {pending.length > 0 && (
@@ -366,7 +357,7 @@ function HostAnswerPhase({
             <p className="text-white/25 text-xs mb-2 uppercase tracking-widest">Still waiting:</p>
             <div className="flex flex-wrap gap-2">
               {pending.map((p) => (
-                <span key={p.id} className="text-xs glass rounded-full px-3 py-1 text-white/50">
+                <span key={p.id} className="text-xs glass rounded-full px-3 py-1 text-white/50 auto-dir" dir="auto">
                   {p.nickname}
                 </span>
               ))}
@@ -412,7 +403,16 @@ function HostVotingPhase({
 
   const answererIds = new Set(answers.map((a) => a.player_id));
   const eligibleVoterCount = players.filter((p) => answererIds.has(p.id)).length;
-  const pct = eligibleVoterCount > 0 ? (votes.length / eligibleVoterCount) * 100 : 0;
+  const maxPossibleVotes = eligibleVoterCount * MAX_VOTES_PER_PLAYER;
+  const pct = maxPossibleVotes > 0 ? (votes.length / maxPossibleVotes) * 100 : 0;
+
+  // Count how many eligible voters have used all their votes
+  const votesByVoter = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const v of votes) m.set(v.voter_id, (m.get(v.voter_id) ?? 0) + 1);
+    return m;
+  }, [votes]);
+  const doneVoterCount = [...votesByVoter.values()].filter((c) => c >= MAX_VOTES_PER_PLAYER).length;
 
   async function endVoting() {
     setEnding(true); setErr("");
@@ -438,23 +438,23 @@ function HostVotingPhase({
       </div>
 
       <div className="glass rounded-3xl p-6 w-full text-center animate-slide-up-1">
-        <p className="text-2xl font-bold text-white auto-dir">{currentRound.prompt_text}</p>
+        <p className="text-2xl font-bold text-white auto-dir" dir="auto">{currentRound.prompt_text}</p>
       </div>
 
       <div className="glass rounded-3xl p-6 w-full animate-slide-up-2">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-base font-bold text-white/60">Votes received</h2>
+        <div className="flex justify-between items-center mb-2">
+          <h2 className="text-base font-bold text-white/60">Votes cast</h2>
           <span className="text-3xl font-black text-gradient-party">
-            {votes.length}&thinsp;/&thinsp;{eligibleVoterCount}
+            {votes.length}&thinsp;/&thinsp;{maxPossibleVotes}
           </span>
         </div>
+        <p className="text-white/30 text-xs mb-4">
+          {doneVoterCount} of {eligibleVoterCount} players finished all {MAX_VOTES_PER_PLAYER} votes
+        </p>
         <div className="w-full h-3 bg-white/8 rounded-full overflow-hidden">
           <div
             className="h-full rounded-full transition-all duration-700"
-            style={{
-              width: `${pct}%`,
-              background: 'linear-gradient(90deg, #be185d, #db2777)',
-            }}
+            style={{ width: `${pct}%`, background: 'linear-gradient(90deg, #be185d, #db2777)' }}
           />
         </div>
       </div>
@@ -494,13 +494,16 @@ function HostResultsPhase({
   const [advancing, setAdvancing] = useState(false);
   const [err, setErr] = useState("");
 
-  const sorted = [...answers]
-    .map((a) => ({
-      ...a,
-      voteCount: votes.filter((v) => v.answer_id === a.id).length,
-      authorNickname: players.find((p) => p.id === a.player_id)?.nickname ?? "?",
-    }))
-    .sort((a, b) => b.voteCount - a.voteCount);
+  const sorted = useMemo(() =>
+    [...answers]
+      .map((a) => ({
+        ...a,
+        voteCount: votes.filter((v) => v.answer_id === a.id).length,
+        authorNickname: players.find((p) => p.id === a.player_id)?.nickname ?? "?",
+      }))
+      .sort((a, b) => b.voteCount - a.voteCount),
+    [answers, votes, players]
+  );
 
   async function showLeaderboard() {
     setAdvancing(true); setErr("");
@@ -526,7 +529,7 @@ function HostResultsPhase({
       </div>
 
       <div className="glass rounded-3xl p-6 text-center animate-slide-up-1">
-        <p className="text-2xl font-bold text-white auto-dir">{currentRound.prompt_text}</p>
+        <p className="text-2xl font-bold text-white auto-dir" dir="auto">{currentRound.prompt_text}</p>
       </div>
 
       <div className="flex flex-col gap-4 flex-1 stagger">
@@ -548,9 +551,9 @@ function HostResultsPhase({
                 </p>
               )}
               <div className="flex items-start justify-between gap-4">
-                <p className="text-2xl font-black text-white flex-1 leading-snug auto-dir">{a.text}</p>
+                <p className="text-2xl font-black text-white flex-1 leading-snug auto-dir" dir="auto">{a.text}</p>
                 <div className="text-right flex-shrink-0">
-                  <p className={`text-2xl font-black ${a.voteCount > 0 ? "text-gradient-gold" : "text-white/20"}`}>
+                  <p className={`text-3xl font-black animate-score-slam ${a.voteCount > 0 ? "text-gradient-gold" : "text-white/20"}`}>
                     {a.voteCount}
                   </p>
                   <p className="text-xs text-white/30 font-medium">
@@ -559,7 +562,7 @@ function HostResultsPhase({
                 </div>
               </div>
               <div className="flex items-center gap-3 mt-3 flex-wrap">
-                <span className="text-sm text-white/40">— {a.authorNickname}</span>
+                <span className="text-sm text-white/40 auto-dir" dir="auto">— {a.authorNickname}</span>
                 {a.voteCount > 0 && (
                   <span className="text-sm text-emerald-400 font-bold">+{a.voteCount * 100} pts</span>
                 )}
@@ -583,15 +586,31 @@ function HostResultsPhase({
   );
 }
 
-// ─── Leaderboard Phase (host view) ────────────────────────────────────────────
+// ─── Leaderboard Phase (host view) — Kahoot-style dramatic reveal ─────────────
 
 const RANK_MEDAL = ["🥇", "🥈", "🥉"];
-const RANK_CLASS = ["rank-gold", "rank-silver", "rank-bronze"];
+const RANK_CLASS_MAP = ["rank-gold", "rank-silver", "rank-bronze"];
+const PLACE_LABEL = ["3rd", "2nd", "1st"];
+const PLACE_COLOR = ["text-amber-600", "text-slate-300", "text-gradient-gold"];
 
 function HostLeaderboard({ room, players, pin }: { room: Room; players: Player[]; pin: string }) {
   const [advancing, setAdvancing] = useState(false);
   const [ending, setEnding] = useState(false);
   const [err, setErr] = useState("");
+
+  const sorted = useMemo(() => [...players].sort((a, b) => b.score - a.score), [players]);
+  const topN = Math.min(sorted.length, 3);
+
+  // Reveal step: 0 = none of top-3 shown, 1 = 3rd, 2 = 2nd, 3 = 1st (all done)
+  const [step, setStep] = useState(0);
+  const advance = useCallback(() => setStep((s) => Math.min(s + 1, topN)), [topN]);
+
+  // Auto-advance every 2.2s until all top-3 revealed
+  useEffect(() => {
+    if (step >= topN) return;
+    const t = setTimeout(advance, step === 0 ? 1000 : 2200);
+    return () => clearTimeout(t);
+  }, [step, topN, advance]);
 
   async function nextRound() {
     setAdvancing(true); setErr("");
@@ -621,53 +640,117 @@ function HostLeaderboard({ room, players, pin }: { room: Room; players: Player[]
     finally { setEnding(false); }
   }
 
-  const sorted = [...players].sort((a, b) => b.score - a.score);
+  // sorted[i]: 0=1st, 1=2nd, 2=3rd
+  // Reveal from bottom: 3rd(i=2) at step 1, 2nd(i=1) at step 2, 1st(i=0) at step 3
+  // isRevealed for index i: (topN - 1 - i) < step  →  step > topN-1-i
+  function isRevealed(i: number) {
+    return i >= topN || (topN - 1 - i) < step;
+  }
+  function isJustRevealed(i: number) {
+    return i < topN && (topN - 1 - i) === step - 1;
+  }
+
+  const allRevealed = step >= topN;
 
   return (
-    <div className="min-h-screen flex flex-col items-center p-6 md:p-10 max-w-3xl mx-auto w-full gap-6">
+    // Click anywhere to skip to next reveal step
+    <div
+      className="min-h-screen flex flex-col items-center p-6 md:p-10 max-w-3xl mx-auto w-full gap-5 relative"
+      onClick={!allRevealed ? advance : undefined}
+      style={{ cursor: allRevealed ? "default" : "pointer" }}
+    >
+      {allRevealed && <Confetti />}
 
-      <div className="text-center animate-slide-up pt-4">
+      <div className="text-center animate-slide-up pt-4 w-full">
         <h2 className="text-5xl font-black text-gradient-purple mb-1">Leaderboard</h2>
-        <p className="text-white/30 text-sm">After this round</p>
+        {!allRevealed && (
+          <p className="text-white/30 text-sm animate-pulse-slow">
+            Tap anywhere to reveal next place…
+          </p>
+        )}
       </div>
 
-      <div className="w-full flex flex-col gap-3 flex-1 stagger">
-        {sorted.map((p, i) => (
-          <div
-            key={p.id}
-            className={`flex items-center gap-4 rounded-2xl px-6 py-4 ${
-              i < 3 ? RANK_CLASS[i] : "glass"
-            }`}
-          >
-            <span className="text-2xl w-8 text-center flex-shrink-0">
-              {i < 3
-                ? RANK_MEDAL[i]
-                : <span className="text-white/25 font-bold text-base">{i + 1}</span>
-              }
-            </span>
-            <span className="text-xl font-bold text-white flex-1 truncate">{p.nickname}</span>
-            <span className="text-2xl font-black text-gradient-gold flex-shrink-0">{p.score}</span>
-          </div>
-        ))}
+      {/* Full sorted list — top-3 revealed one by one, rest always visible */}
+      <div className="w-full flex flex-col gap-3 flex-1">
+        {sorted.map((p, i) => {
+          const revealed = isRevealed(i);
+          const justRevealed = isJustRevealed(i);
+
+          if (!revealed) {
+            // Pulsing placeholder for unrevealed top-3 slots
+            return (
+              <div
+                key={`ph-${i}`}
+                className="h-16 rounded-2xl glass animate-pulse-slow opacity-25"
+              />
+            );
+          }
+
+          return (
+            <div
+              key={p.id}
+              className={`flex items-center gap-4 rounded-2xl px-6 py-4 ${
+                i < 3 ? RANK_CLASS_MAP[i] : "glass"
+              } ${justRevealed ? "animate-reveal-pop animate-rank-flash" : ""} ${
+                i === 0 && allRevealed ? "animate-gold-glow" : ""
+              }`}
+            >
+              {/* Place label shown briefly on just-revealed card */}
+              {justRevealed && i < topN && (
+                <div className="absolute left-1/2 -translate-x-1/2 -top-8 text-center pointer-events-none">
+                  <span className={`text-2xl font-black ${PLACE_COLOR[topN - 1 - i] ?? "text-white"}`}>
+                    {PLACE_LABEL[topN - 1 - i]} Place!
+                  </span>
+                </div>
+              )}
+
+              <span className="text-2xl w-8 text-center flex-shrink-0">
+                {i < 3
+                  ? RANK_MEDAL[i]
+                  : <span className="text-white/25 font-bold text-base">{i + 1}</span>
+                }
+              </span>
+              <span
+                className={`font-bold text-white flex-1 truncate auto-dir ${
+                  justRevealed ? "text-2xl" : "text-xl"
+                }`}
+                dir="auto"
+              >
+                {p.nickname}
+              </span>
+              <span className={`font-black text-gradient-gold flex-shrink-0 ${
+                justRevealed ? "text-3xl animate-score-slam" : "text-2xl"
+              }`}>
+                {p.score}
+              </span>
+            </div>
+          );
+        })}
       </div>
 
       {err && <p className="text-rose-400 text-sm font-medium">{err}</p>}
-      <div className="flex gap-4 pb-4">
-        <button
-          onClick={nextRound}
-          disabled={advancing || ending}
-          className="btn btn-green px-10 py-4 text-lg rounded-2xl flex-1"
+
+      {allRevealed && (
+        <div
+          className="flex gap-4 pb-4 animate-slide-up"
+          onClick={(e) => e.stopPropagation()}
         >
-          {advancing ? "Loading…" : "▶ Next Round"}
-        </button>
-        <button
-          onClick={endGame}
-          disabled={ending || advancing}
-          className="btn btn-red px-10 py-4 text-lg rounded-2xl flex-1"
-        >
-          {ending ? "Ending…" : "🏆 End Game"}
-        </button>
-      </div>
+          <button
+            onClick={nextRound}
+            disabled={advancing || ending}
+            className="btn btn-green px-10 py-4 text-lg rounded-2xl flex-1"
+          >
+            {advancing ? "Loading…" : "▶ Next Round"}
+          </button>
+          <button
+            onClick={endGame}
+            disabled={ending || advancing}
+            className="btn btn-red px-10 py-4 text-lg rounded-2xl flex-1"
+          >
+            {ending ? "Ending…" : "🏆 End Game"}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -675,7 +758,7 @@ function HostLeaderboard({ room, players, pin }: { room: Room; players: Player[]
 // ─── Game Over (host view) ────────────────────────────────────────────────────
 
 function HostGameOver({ players }: { players: Player[] }) {
-  const sorted = [...players].sort((a, b) => b.score - a.score);
+  const sorted = useMemo(() => [...players].sort((a, b) => b.score - a.score), [players]);
   const winner = sorted[0];
 
   return (
@@ -685,7 +768,7 @@ function HostGameOver({ players }: { players: Player[] }) {
       <div className="animate-pop text-9xl mb-6">🏆</div>
 
       <div className="animate-slide-up-1 mb-10">
-        <h1 className="text-6xl font-black text-gradient-gold mb-2">
+        <h1 className="text-6xl font-black text-gradient-gold mb-2 auto-dir" dir="auto">
           {winner?.nickname ?? "Nobody"}
         </h1>
         <p className="text-white/40 text-xl">wins with {winner?.score ?? 0} points!</p>
@@ -696,13 +779,13 @@ function HostGameOver({ players }: { players: Player[] }) {
           <div
             key={p.id}
             className={`flex items-center gap-4 rounded-2xl px-5 py-4 ${
-              i < 3 ? RANK_CLASS[i] : "glass"
+              i < 3 ? RANK_CLASS_MAP[i] : "glass"
             }`}
           >
             <span className="text-xl w-8 text-center flex-shrink-0">
               {i < 3 ? RANK_MEDAL[i] : <span className="text-white/25 font-bold">{i + 1}</span>}
             </span>
-            <span className="text-white font-bold flex-1 truncate text-lg">{p.nickname}</span>
+            <span className="text-white font-bold flex-1 truncate text-lg auto-dir" dir="auto">{p.nickname}</span>
             <span className="text-gradient-gold font-black text-xl flex-shrink-0">{p.score}</span>
           </div>
         ))}
@@ -797,7 +880,7 @@ function AdminControls({
                     disabled={isLoading}
                     className="flex justify-between items-center py-2.5 px-4 rounded-xl bg-rose-900/30 hover:bg-rose-800/50 text-white text-sm transition-all disabled:opacity-50"
                   >
-                    <span className="font-semibold">{p.nickname}</span>
+                    <span className="font-semibold auto-dir" dir="auto">{p.nickname}</span>
                     <span className="text-rose-400 text-xs font-bold">Remove</span>
                   </button>
                 ))}
@@ -899,7 +982,6 @@ export default function HostPage() {
 
   return (
     <>
-      {/* Admin button — always visible */}
       <button
         onClick={() => setShowAdmin(true)}
         className="fixed top-4 right-4 z-40 glass hover:glass-strong text-white/50 hover:text-white text-xs font-bold px-3 py-2 rounded-xl transition-all"

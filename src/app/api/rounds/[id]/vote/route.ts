@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createServiceClient } from "@/lib/supabase/server";
+import { MAX_VOTES_PER_PLAYER } from "@/lib/config";
 
 export async function POST(
   request: Request,
@@ -16,7 +17,6 @@ export async function POST(
 
     const supabase = createServiceClient();
 
-    // Verify round exists
     const { data: round, error: roundErr } = await supabase
       .from("rounds")
       .select("id, room_id")
@@ -27,7 +27,6 @@ export async function POST(
       return NextResponse.json({ error: "Round not found." }, { status: 404 });
     }
 
-    // Check room is in voting state
     const { data: room } = await supabase
       .from("rooms")
       .select("state")
@@ -38,7 +37,6 @@ export async function POST(
       return NextResponse.json({ error: "Voting is closed." }, { status: 400 });
     }
 
-    // Verify voter is active in this room
     const { data: voter } = await supabase
       .from("players")
       .select("id")
@@ -51,7 +49,6 @@ export async function POST(
       return NextResponse.json({ error: "Voter not found in this room." }, { status: 404 });
     }
 
-    // Verify the answer exists in this round
     const { data: answer } = await supabase
       .from("answers")
       .select("id, player_id")
@@ -63,12 +60,10 @@ export async function POST(
       return NextResponse.json({ error: "Answer not found." }, { status: 404 });
     }
 
-    // Prevent voting for your own answer
     if (answer.player_id === voterId) {
       return NextResponse.json({ error: "You cannot vote for your own answer." }, { status: 400 });
     }
 
-    // Check voter submitted an answer (only answerers can vote)
     const { data: voterAnswer } = await supabase
       .from("answers")
       .select("id")
@@ -80,19 +75,33 @@ export async function POST(
       return NextResponse.json({ error: "You must submit an answer to vote." }, { status: 400 });
     }
 
-    // Check voter hasn't already voted
-    const { data: existingVote } = await supabase
+    // Check total votes used this round by this voter
+    const { count: usedVotes } = await supabase
+      .from("votes")
+      .select("id", { count: "exact", head: true })
+      .eq("round_id", roundId)
+      .eq("voter_id", voterId);
+
+    if ((usedVotes ?? 0) >= MAX_VOTES_PER_PLAYER) {
+      return NextResponse.json(
+        { error: `You've used all ${MAX_VOTES_PER_PLAYER} votes this round.` },
+        { status: 409 }
+      );
+    }
+
+    // Check not already voted for this specific answer (also caught by DB constraint)
+    const { data: dupVote } = await supabase
       .from("votes")
       .select("id")
       .eq("round_id", roundId)
       .eq("voter_id", voterId)
+      .eq("answer_id", answerId)
       .single();
 
-    if (existingVote) {
-      return NextResponse.json({ error: "You already voted this round." }, { status: 409 });
+    if (dupVote) {
+      return NextResponse.json({ error: "You already voted for this answer." }, { status: 409 });
     }
 
-    // Submit vote
     const { error: voteErr } = await supabase.from("votes").insert({
       round_id: roundId,
       voter_id: voterId,
@@ -100,6 +109,9 @@ export async function POST(
     });
 
     if (voteErr) {
+      if (voteErr.code === "23505") {
+        return NextResponse.json({ error: "You already voted for this answer." }, { status: 409 });
+      }
       console.error("Vote insert error:", voteErr);
       return NextResponse.json({ error: "Failed to submit vote." }, { status: 500 });
     }
