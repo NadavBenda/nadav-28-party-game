@@ -85,7 +85,9 @@ export function useAudio(): AudioController {
 
   const playSfx = useCallback((sound: SfxSound) => {
     if (!enabledRef.current || mutedRef.current) return;
-    const audio = new Audio(`/audio/${sound}.mp3`);
+    // SFX are OGG (Kenney CC0). Chrome/Firefox/Android support OGG natively.
+    // iOS/Safari will silently skip — the game is fully functional without SFX.
+    const audio = new Audio(`/audio/${sound}.ogg`);
     audio.volume = 0.65;
     audio.play().catch(() => {});
   }, []);
