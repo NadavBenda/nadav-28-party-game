@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useParams } from "next/navigation";
 import { useGameRoom } from "@/hooks/useGameRoom";
+import { useAudio, type AudioController } from "@/hooks/useAudio";
 import { createClient } from "@/lib/supabase/client";
 import { MAX_VOTES_PER_PLAYER } from "@/lib/config";
 import type { Room, Player } from "@/lib/types";
@@ -60,6 +61,30 @@ function Confetti() {
         />
       ))}
     </div>
+  );
+}
+
+// ─── Sound Button ─────────────────────────────────────────────────────────────
+
+function SoundButton({ audio }: { audio: AudioController }) {
+  if (!audio.enabled) {
+    return (
+      <button
+        onClick={audio.enable}
+        className="glass hover:glass-strong text-white/70 hover:text-white text-xs font-bold px-3 py-2 rounded-xl transition-all flex items-center gap-1.5"
+      >
+        🔊 Sound
+      </button>
+    );
+  }
+  return (
+    <button
+      onClick={audio.toggleMute}
+      className="glass hover:glass-strong text-white/50 hover:text-white text-xs font-bold px-3 py-2 rounded-xl transition-all"
+      title={audio.muted ? "Unmute" : "Mute"}
+    >
+      {audio.muted ? "🔇" : "🔊"}
+    </button>
   );
 }
 
@@ -406,7 +431,6 @@ function HostVotingPhase({
   const maxPossibleVotes = eligibleVoterCount * MAX_VOTES_PER_PLAYER;
   const pct = maxPossibleVotes > 0 ? (votes.length / maxPossibleVotes) * 100 : 0;
 
-  // Count how many eligible voters have used all their votes
   const votesByVoter = useMemo(() => {
     const m = new Map<string, number>();
     for (const v of votes) m.set(v.voter_id, (m.get(v.voter_id) ?? 0) + 1);
@@ -586,14 +610,26 @@ function HostResultsPhase({
   );
 }
 
-// ─── Leaderboard Phase (host view) — Kahoot-style dramatic reveal ─────────────
+// ─── Leaderboard shared constants ─────────────────────────────────────────────
 
-const RANK_MEDAL = ["🥇", "🥈", "🥉"];
+const RANK_MEDAL    = ["🥇", "🥈", "🥉"];
 const RANK_CLASS_MAP = ["rank-gold", "rank-silver", "rank-bronze"];
-const PLACE_LABEL = ["3rd", "2nd", "1st"];
-const PLACE_COLOR = ["text-amber-600", "text-slate-300", "text-gradient-gold"];
+const PLACE_LABEL   = ["3rd", "2nd", "1st"];
+const PLACE_COLOR   = ["text-amber-600", "text-slate-300", "text-gradient-gold"];
 
-function HostLeaderboard({ room, players, pin }: { room: Room; players: Player[]; pin: string }) {
+// ─── Leaderboard Phase (host view) — fast reveal between rounds ───────────────
+
+function HostLeaderboard({
+  room,
+  players,
+  pin,
+  audio,
+}: {
+  room: Room;
+  players: Player[];
+  pin: string;
+  audio: Pick<AudioController, "playSfx">;
+}) {
   const [advancing, setAdvancing] = useState(false);
   const [ending, setEnding] = useState(false);
   const [err, setErr] = useState("");
@@ -601,16 +637,30 @@ function HostLeaderboard({ room, players, pin }: { room: Room; players: Player[]
   const sorted = useMemo(() => [...players].sort((a, b) => b.score - a.score), [players]);
   const topN = Math.min(sorted.length, 3);
 
-  // Reveal step: 0 = none of top-3 shown, 1 = 3rd, 2 = 2nd, 3 = 1st (all done)
+  // step 0 = none, 1 = 3rd revealed, 2 = 2nd, 3 = all (topN)
   const [step, setStep] = useState(0);
   const advance = useCallback(() => setStep((s) => Math.min(s + 1, topN)), [topN]);
 
-  // Auto-advance every 2.2s until all top-3 revealed
+  // 3× faster than original (333 ms first, 733 ms subsequent)
   useEffect(() => {
     if (step >= topN) return;
-    const t = setTimeout(advance, step === 0 ? 1000 : 2200);
+    const delay = step === 0 ? 333 : 733;
+    const t = setTimeout(advance, delay);
     return () => clearTimeout(t);
   }, [step, topN, advance]);
+
+  // Sound effects on each reveal step
+  const prevStepRef = useRef(0);
+  useEffect(() => {
+    if (step > prevStepRef.current) {
+      if (step >= topN && topN > 0) {
+        audio.playSfx("sfx-winner");
+      } else if (step > 0) {
+        audio.playSfx("sfx-reveal");
+      }
+      prevStepRef.current = step;
+    }
+  }, [step, topN, audio]);
 
   async function nextRound() {
     setAdvancing(true); setErr("");
@@ -641,8 +691,7 @@ function HostLeaderboard({ room, players, pin }: { room: Room; players: Player[]
   }
 
   // sorted[i]: 0=1st, 1=2nd, 2=3rd
-  // Reveal from bottom: 3rd(i=2) at step 1, 2nd(i=1) at step 2, 1st(i=0) at step 3
-  // isRevealed for index i: (topN - 1 - i) < step  →  step > topN-1-i
+  // Reveal from bottom: 3rd(i=2) at step=1, 2nd(i=1) at step=2, 1st(i=0) at step=3
   function isRevealed(i: number) {
     return i >= topN || (topN - 1 - i) < step;
   }
@@ -653,7 +702,6 @@ function HostLeaderboard({ room, players, pin }: { room: Room; players: Player[]
   const allRevealed = step >= topN;
 
   return (
-    // Click anywhere to skip to next reveal step
     <div
       className="min-h-screen flex flex-col items-center p-6 md:p-10 max-w-3xl mx-auto w-full gap-5 relative"
       onClick={!allRevealed ? advance : undefined}
@@ -670,14 +718,12 @@ function HostLeaderboard({ room, players, pin }: { room: Room; players: Player[]
         )}
       </div>
 
-      {/* Full sorted list — top-3 revealed one by one, rest always visible */}
       <div className="w-full flex flex-col gap-3 flex-1">
         {sorted.map((p, i) => {
           const revealed = isRevealed(i);
           const justRevealed = isJustRevealed(i);
 
           if (!revealed) {
-            // Pulsing placeholder for unrevealed top-3 slots
             return (
               <div
                 key={`ph-${i}`}
@@ -689,13 +735,12 @@ function HostLeaderboard({ room, players, pin }: { room: Room; players: Player[]
           return (
             <div
               key={p.id}
-              className={`flex items-center gap-4 rounded-2xl px-6 py-4 ${
+              className={`relative flex items-center gap-4 rounded-2xl px-6 py-4 ${
                 i < 3 ? RANK_CLASS_MAP[i] : "glass"
               } ${justRevealed ? "animate-reveal-pop animate-rank-flash" : ""} ${
                 i === 0 && allRevealed ? "animate-gold-glow" : ""
               }`}
             >
-              {/* Place label shown briefly on just-revealed card */}
               {justRevealed && i < topN && (
                 <div className="absolute left-1/2 -translate-x-1/2 -top-8 text-center pointer-events-none">
                   <span className={`text-2xl font-black ${PLACE_COLOR[topN - 1 - i] ?? "text-white"}`}>
@@ -755,45 +800,147 @@ function HostLeaderboard({ room, players, pin }: { room: Room; players: Player[]
   );
 }
 
-// ─── Game Over (host view) ────────────────────────────────────────────────────
+// ─── Game Over (host view) — slow dramatic reveal ─────────────────────────────
 
-function HostGameOver({ players }: { players: Player[] }) {
+function HostGameOver({
+  players,
+  audio,
+}: {
+  players: Player[];
+  audio: Pick<AudioController, "playSfx">;
+}) {
   const sorted = useMemo(() => [...players].sort((a, b) => b.score - a.score), [players]);
+  const topN = Math.min(sorted.length, 3);
+
+  const [step, setStep] = useState(0);
+  const advance = useCallback(() => setStep((s) => Math.min(s + 1, topN)), [topN]);
+
+  // 2× slower than original (2000 ms first, 4400 ms subsequent)
+  useEffect(() => {
+    if (step >= topN) return;
+    const delay = step === 0 ? 2000 : 4400;
+    const t = setTimeout(advance, delay);
+    return () => clearTimeout(t);
+  }, [step, topN, advance]);
+
+  // Sound on reveal
+  const prevStepRef = useRef(0);
+  useEffect(() => {
+    if (step > prevStepRef.current) {
+      if (step >= topN && topN > 0) {
+        audio.playSfx("sfx-winner");
+      } else if (step > 0) {
+        audio.playSfx("sfx-reveal");
+      }
+      prevStepRef.current = step;
+    }
+  }, [step, topN, audio]);
+
+  function isRevealed(i: number) {
+    return i >= topN || (topN - 1 - i) < step;
+  }
+  function isJustRevealed(i: number) {
+    return i < topN && (topN - 1 - i) === step - 1;
+  }
+
+  const allRevealed = step >= topN;
   const winner = sorted[0];
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-8 text-center">
-      <Confetti />
+    <div
+      className="min-h-screen flex flex-col items-center p-6 md:p-10 max-w-3xl mx-auto w-full gap-5 relative"
+      onClick={!allRevealed ? advance : undefined}
+      style={{ cursor: allRevealed ? "default" : "pointer" }}
+    >
+      {allRevealed && <Confetti />}
 
-      <div className="animate-pop text-9xl mb-6">🏆</div>
-
-      <div className="animate-slide-up-1 mb-10">
-        <h1 className="text-6xl font-black text-gradient-gold mb-2 auto-dir" dir="auto">
-          {winner?.nickname ?? "Nobody"}
-        </h1>
-        <p className="text-white/40 text-xl">wins with {winner?.score ?? 0} points!</p>
+      {/* Title */}
+      <div className="text-center animate-slide-up pt-4 w-full">
+        <h2 className="text-5xl font-black text-gradient-gold mb-1">
+          {allRevealed ? "🏆 Final Scores!" : "Game Over"}
+        </h2>
+        {!allRevealed && (
+          <p className="text-white/30 text-sm animate-pulse-slow">
+            Tap anywhere to reveal…
+          </p>
+        )}
       </div>
 
-      <div className="w-full max-w-md flex flex-col gap-3 stagger animate-slide-up-2">
-        {sorted.map((p, i) => (
-          <div
-            key={p.id}
-            className={`flex items-center gap-4 rounded-2xl px-5 py-4 ${
-              i < 3 ? RANK_CLASS_MAP[i] : "glass"
-            }`}
-          >
-            <span className="text-xl w-8 text-center flex-shrink-0">
-              {i < 3 ? RANK_MEDAL[i] : <span className="text-white/25 font-bold">{i + 1}</span>}
-            </span>
-            <span className="text-white font-bold flex-1 truncate text-lg auto-dir" dir="auto">{p.nickname}</span>
-            <span className="text-gradient-gold font-black text-xl flex-shrink-0">{p.score}</span>
-          </div>
-        ))}
+      {/* Winner spotlight — shown after full reveal */}
+      {allRevealed && winner && (
+        <div className="text-center animate-pop">
+          <p className="text-white/50 text-sm uppercase tracking-widest mb-1">Winner</p>
+          <p className="text-6xl font-black text-gradient-gold auto-dir" dir="auto">
+            {winner.nickname}
+          </p>
+          <p className="text-white/40 text-lg mt-1">{winner.score} points</p>
+        </div>
+      )}
+
+      {/* Ranked list */}
+      <div className="w-full flex flex-col gap-3 flex-1">
+        {sorted.map((p, i) => {
+          const revealed = isRevealed(i);
+          const justRevealed = isJustRevealed(i);
+
+          if (!revealed) {
+            return (
+              <div
+                key={`ph-${i}`}
+                className="h-16 rounded-2xl glass animate-pulse-slow opacity-25"
+              />
+            );
+          }
+
+          return (
+            <div
+              key={p.id}
+              className={`relative flex items-center gap-4 rounded-2xl px-6 py-4 ${
+                i < 3 ? RANK_CLASS_MAP[i] : "glass"
+              } ${justRevealed ? "animate-reveal-pop animate-rank-flash" : ""} ${
+                i === 0 && allRevealed ? "animate-gold-glow" : ""
+              }`}
+            >
+              {justRevealed && i < topN && (
+                <div className="absolute left-1/2 -translate-x-1/2 -top-8 text-center pointer-events-none">
+                  <span className={`text-2xl font-black ${PLACE_COLOR[topN - 1 - i] ?? "text-white"}`}>
+                    {PLACE_LABEL[topN - 1 - i]} Place!
+                  </span>
+                </div>
+              )}
+
+              <span className="text-2xl w-8 text-center flex-shrink-0">
+                {i < 3
+                  ? RANK_MEDAL[i]
+                  : <span className="text-white/25 font-bold text-base">{i + 1}</span>
+                }
+              </span>
+              <span
+                className={`font-bold text-white flex-1 truncate auto-dir ${
+                  justRevealed ? "text-2xl" : "text-xl"
+                }`}
+                dir="auto"
+              >
+                {p.nickname}
+              </span>
+              <span className={`font-black text-gradient-gold flex-shrink-0 ${
+                justRevealed ? "text-3xl animate-score-slam" : "text-2xl"
+              }`}>
+                {p.score}
+              </span>
+            </div>
+          );
+        })}
       </div>
 
-      <p className="mt-12 text-white/20 text-sm animate-slide-up-3">
-        🎂 Happy 28th Birthday, Nadav! 🎂
-      </p>
+      {allRevealed && (
+        <p
+          className="mt-4 text-white/30 text-sm animate-slide-up-3"
+          onClick={(e) => e.stopPropagation()}
+        >
+          🎂 Happy 28th Birthday, Nadav! 🎂
+        </p>
+      )}
     </div>
   );
 }
@@ -908,6 +1055,8 @@ export default function HostPage() {
   const [pin, setPin] = useState("");
   const [showAdmin, setShowAdmin] = useState(false);
 
+  const audio = useAudio();
+
   useEffect(() => {
     async function restore() {
       await Promise.resolve();
@@ -916,6 +1065,19 @@ export default function HostPage() {
     }
     void restore();
   }, []);
+
+  // Phase-based background music
+  useEffect(() => {
+    if (!room) return;
+    const trackMap: Record<string, Parameters<typeof audio.playBg>[0]> = {
+      answer_submission: "bg-answering",
+      voting: "bg-voting",
+      results: "bg-results",
+      leaderboard: "bg-leaderboard",
+      game_over: "bg-gameover",
+    };
+    audio.playBg(trackMap[room.state] ?? null);
+  }, [room?.state]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pinVerified = pin !== "" && room !== null && pin === room.host_pin;
 
@@ -968,9 +1130,9 @@ export default function HostPage() {
           />
         );
       case "leaderboard":
-        return <HostLeaderboard room={room} players={players} pin={pin} />;
+        return <HostLeaderboard room={room} players={players} pin={pin} audio={audio} />;
       case "game_over":
-        return <HostGameOver players={players} />;
+        return <HostGameOver players={players} audio={audio} />;
       default:
         return (
           <div className="text-center p-8 text-white/30">
@@ -982,12 +1144,16 @@ export default function HostPage() {
 
   return (
     <>
-      <button
-        onClick={() => setShowAdmin(true)}
-        className="fixed top-4 right-4 z-40 glass hover:glass-strong text-white/50 hover:text-white text-xs font-bold px-3 py-2 rounded-xl transition-all"
-      >
-        ⚙ Admin
-      </button>
+      {/* Top-right controls */}
+      <div className="fixed top-4 right-4 z-40 flex items-center gap-2">
+        <SoundButton audio={audio} />
+        <button
+          onClick={() => setShowAdmin(true)}
+          className="glass hover:glass-strong text-white/50 hover:text-white text-xs font-bold px-3 py-2 rounded-xl transition-all"
+        >
+          ⚙ Admin
+        </button>
+      </div>
 
       {showAdmin && (
         <AdminControls

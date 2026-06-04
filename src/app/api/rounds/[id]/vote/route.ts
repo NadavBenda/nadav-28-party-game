@@ -118,7 +118,73 @@ export async function POST(
 
     return NextResponse.json({ success: true });
   } catch (err) {
-    console.error("Unexpected error in /api/rounds/[id]/vote:", err);
+    console.error("Unexpected error in /api/rounds/[id]/vote POST:", err);
+    return NextResponse.json({ error: "Server error." }, { status: 500 });
+  }
+}
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const { id: roundId } = await params;
+    const body = await request.json();
+    const { voterId, answerId } = body;
+
+    if (!voterId || !answerId) {
+      return NextResponse.json({ error: "voterId and answerId are required." }, { status: 400 });
+    }
+
+    const supabase = createServiceClient();
+
+    const { data: round, error: roundErr } = await supabase
+      .from("rounds")
+      .select("id, room_id")
+      .eq("id", roundId)
+      .single();
+
+    if (roundErr || !round) {
+      return NextResponse.json({ error: "Round not found." }, { status: 404 });
+    }
+
+    const { data: room } = await supabase
+      .from("rooms")
+      .select("state")
+      .eq("id", round.room_id)
+      .single();
+
+    if (room?.state !== "voting") {
+      return NextResponse.json({ error: "Voting is closed." }, { status: 400 });
+    }
+
+    const { data: voter } = await supabase
+      .from("players")
+      .select("id")
+      .eq("id", voterId)
+      .eq("room_id", round.room_id)
+      .eq("is_active", true)
+      .single();
+
+    if (!voter) {
+      return NextResponse.json({ error: "Voter not found in this room." }, { status: 404 });
+    }
+
+    const { error: delErr } = await supabase
+      .from("votes")
+      .delete()
+      .eq("round_id", roundId)
+      .eq("voter_id", voterId)
+      .eq("answer_id", answerId);
+
+    if (delErr) {
+      console.error("Vote delete error:", delErr);
+      return NextResponse.json({ error: "Failed to remove vote." }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error("Unexpected error in /api/rounds/[id]/vote DELETE:", err);
     return NextResponse.json({ error: "Server error." }, { status: 500 });
   }
 }

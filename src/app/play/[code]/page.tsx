@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useGameRoom } from "@/hooks/useGameRoom";
+import { useAudio, type AudioController } from "@/hooks/useAudio";
 import { MAX_VOTES_PER_PLAYER } from "@/lib/config";
 import type { Room, Player, Round, Answer, Vote } from "@/lib/types";
 
@@ -41,6 +42,30 @@ function WaitingBanner({ text }: { text: string }) {
         <div className="w-2.5 h-2.5 bg-purple-500 rounded-full dot-3" />
       </div>
     </div>
+  );
+}
+
+// ─── Sound Button ─────────────────────────────────────────────────────────────
+
+function SoundButton({ audio }: { audio: AudioController }) {
+  if (!audio.enabled) {
+    return (
+      <button
+        onClick={audio.enable}
+        className="fixed bottom-4 right-4 z-40 glass hover:glass-strong text-white/60 hover:text-white text-xs font-bold px-3 py-2 rounded-xl transition-all"
+      >
+        🔊 Sound
+      </button>
+    );
+  }
+  return (
+    <button
+      onClick={audio.toggleMute}
+      className="fixed bottom-4 right-4 z-40 glass hover:glass-strong text-white/40 hover:text-white text-xs font-bold px-3 py-2 rounded-xl transition-all"
+      title={audio.muted ? "Unmute" : "Mute"}
+    >
+      {audio.muted ? "🔇" : "🔊"}
+    </button>
   );
 }
 
@@ -151,10 +176,12 @@ function PlayerAnswerForm({
   round,
   me,
   existingAnswer,
+  playSfx,
 }: {
   round: Round;
   me: Player;
   existingAnswer: Answer | undefined;
+  playSfx: AudioController["playSfx"];
 }) {
   const [text, setText] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -183,6 +210,7 @@ function PlayerAnswerForm({
       });
       const data = await res.json();
       if (!res.ok) { setErr(data.error ?? "Failed to submit."); return; }
+      playSfx("sfx-answer-submit");
       setLocalSubmitted(true);
     } catch { setErr("Network error. Try again."); }
     finally { setSubmitting(false); }
@@ -200,7 +228,6 @@ function PlayerAnswerForm({
           </span>
         </div>
 
-        {/* Prompt — dir="auto" ensures Hebrew punctuation is placed correctly */}
         <div className="glass rounded-3xl p-6 animate-slide-up-1" style={{ borderColor: 'rgba(139,92,246,0.25)' }}>
           <p className="text-2xl font-black text-white text-center leading-snug auto-dir" dir="auto">
             {round.prompt_text}
@@ -244,32 +271,72 @@ function PlayerVotingForm({
   answers,
   myAnswer,
   myVotes,
+  playSfx,
 }: {
   round: Round;
   me: Player;
   answers: Answer[];
   myAnswer: Answer | undefined;
   myVotes: Vote[];
+  playSfx: AudioController["playSfx"];
 }) {
-  const [pending, setPending] = useState<string | null>(null);
-  const [err, setErr] = useState("");
+  // Single map tracks optimistic intent per answer: "add" | "remove"
+  // On success we leave the entry (server broadcast cleans it up naturally).
+  // On failure we delete the entry to revert.
+  const [pendingOps, setPendingOps] = useState<Map<string, "add" | "remove">>(new Map());
 
-  const votedAnswerIds = useMemo(() => new Set(myVotes.map((v) => v.answer_id)), [myVotes]);
-  const votesLeft = MAX_VOTES_PER_PLAYER - myVotes.length;
+  const serverVotedIds = useMemo(
+    () => new Set(myVotes.map((v) => v.answer_id)),
+    [myVotes]
+  );
 
+  // Effective voted state = apply pendingOps on top of server state (insertion order)
+  const effectiveVotedIds = useMemo(() => {
+    const s = new Set(serverVotedIds);
+    for (const [id, op] of pendingOps) {
+      if (op === "add") s.add(id);
+      else s.delete(id);
+    }
+    return s;
+  }, [serverVotedIds, pendingOps]);
+
+  const votesLeft = MAX_VOTES_PER_PLAYER - effectiveVotedIds.size;
+
+  // Answers sorted consistently (exclude own)
   const shuffled = useMemo(
     () => answers.filter((a) => a.player_id !== me.id).sort((a, b) => a.id.localeCompare(b.id)),
     [answers, me.id]
   );
 
-  if (votesLeft <= 0) {
-    return (
-      <SubmittedScreen
-        emoji="🗳️"
-        title={`${MAX_VOTES_PER_PLAYER} votes cast!`}
-        subtitle="Waiting for results…"
-      />
-    );
+  function setPendingOp(answerId: string, op: "add" | "remove") {
+    setPendingOps((prev) => { const m = new Map(prev); m.set(answerId, op); return m; });
+  }
+  function clearPendingOp(answerId: string) {
+    setPendingOps((prev) => { const m = new Map(prev); m.delete(answerId); return m; });
+  }
+
+  function toggleVote(answerId: string) {
+    const isVoted = effectiveVotedIds.has(answerId);
+
+    if (isVoted) {
+      setPendingOp(answerId, "remove");
+      fetch(`/api/rounds/${round.id}/vote`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ voterId: me.id, answerId }),
+      }).catch(() => clearPendingOp(answerId)); // revert on network error
+    } else {
+      if (votesLeft <= 0) return;
+      setPendingOp(answerId, "add");
+      playSfx("sfx-vote");
+      fetch(`/api/rounds/${round.id}/vote`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ voterId: me.id, answerId }),
+      })
+        .then((res) => { if (!res.ok) clearPendingOp(answerId); })
+        .catch(() => clearPendingOp(answerId));
+    }
   }
 
   if (!myAnswer) {
@@ -278,22 +345,6 @@ function PlayerVotingForm({
 
   if (shuffled.length === 0) {
     return <WaitingBanner text="Not enough answers to vote on yet." />;
-  }
-
-  async function vote(answerId: string) {
-    if (pending || votedAnswerIds.has(answerId)) return;
-    setPending(answerId);
-    setErr("");
-    try {
-      const res = await fetch(`/api/rounds/${round.id}/vote`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ voterId: me.id, answerId }),
-      });
-      const data = await res.json();
-      if (!res.ok) setErr(data.error ?? "Failed to vote.");
-    } catch { setErr("Network error. Try again."); }
-    finally { setPending(null); }
   }
 
   const letterLabels = ["A", "B", "C", "D", "E", "F", "G", "H"];
@@ -308,14 +359,18 @@ function PlayerVotingForm({
             {Array.from({ length: MAX_VOTES_PER_PLAYER }).map((_, i) => (
               <div
                 key={i}
-                className={`w-3.5 h-3.5 rounded-full transition-all duration-300 ${
-                  i < myVotes.length ? "bg-purple-500 scale-110" : "bg-white/20"
+                className={`w-3.5 h-3.5 rounded-full transition-all duration-150 ${
+                  i < effectiveVotedIds.size
+                    ? "bg-purple-500 scale-110"
+                    : "bg-white/20"
                 }`}
               />
             ))}
           </div>
           <p className="text-white/50 text-sm font-bold">
-            {votesLeft} vote{votesLeft !== 1 ? "s" : ""} remaining
+            {votesLeft > 0
+              ? `${votesLeft} vote${votesLeft !== 1 ? "s" : ""} remaining`
+              : "All votes cast — tap to swap"}
           </p>
         </div>
 
@@ -329,26 +384,24 @@ function PlayerVotingForm({
         {/* Answer cards */}
         <div className="flex flex-col gap-3 flex-1 stagger">
           {shuffled.map((a, i) => {
-            const hasVoted = votedAnswerIds.has(a.id);
-            const isPending = pending === a.id;
+            const hasVoted = effectiveVotedIds.has(a.id);
+            const isInFlight = pendingOps.has(a.id);
+
             return (
               <button
                 key={a.id}
-                onClick={() => vote(a.id)}
-                disabled={isPending}
-                className={`w-full text-left p-5 rounded-2xl transition-all duration-200 active:scale-[0.97] ${
+                onClick={() => toggleVote(a.id)}
+                className={`w-full text-left p-5 rounded-2xl transition-all duration-150 active:scale-[0.97] ${
                   hasVoted
-                    ? "bg-emerald-700/30 border border-emerald-400/50"
-                    : isPending
-                    ? "bg-purple-600/40 border border-purple-400/60"
+                    ? "bg-emerald-700/30 border border-emerald-400/60 shadow-[0_0_16px_rgba(52,211,153,0.25)]"
                     : "glass hover:bg-purple-700/20 hover:border-purple-500/30"
-                }`}
+                } ${isInFlight ? "opacity-75" : ""}`}
               >
-                <div className="flex items-start gap-3">
-                  <span className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-black ${
-                    hasVoted ? "bg-emerald-400 text-black" :
-                    isPending ? "bg-purple-400 text-white" :
-                    "bg-white/10 text-white/40"
+                <div className="flex items-center gap-3">
+                  <span className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-xs font-black transition-all duration-150 ${
+                    hasVoted
+                      ? "bg-emerald-400 text-black scale-110"
+                      : "bg-white/10 text-white/40"
                   }`}>
                     {hasVoted ? "✓" : (letterLabels[i] ?? i + 1)}
                   </span>
@@ -356,7 +409,9 @@ function PlayerVotingForm({
                     {a.text}
                   </span>
                   {hasVoted && (
-                    <span className="text-emerald-400 text-xs font-black flex-shrink-0">Voted!</span>
+                    <span className="text-emerald-400 text-xs font-black flex-shrink-0">
+                      Tap to undo
+                    </span>
                   )}
                 </div>
               </button>
@@ -364,9 +419,8 @@ function PlayerVotingForm({
           })}
         </div>
 
-        {err && <p className="text-rose-400 text-sm text-center font-medium">{err}</p>}
         <p className="text-center text-white/25 text-xs pb-2">
-          Tap to vote · You can spread votes across multiple answers
+          Tap to vote · Tap again to undo
         </p>
       </div>
     </div>
@@ -567,6 +621,8 @@ export default function PlayPage() {
 
   const [playerId, setPlayerId] = useState<string | null>(null);
 
+  const audio = useAudio();
+
   useEffect(() => {
     async function restoreIdentity() {
       await Promise.resolve();
@@ -595,6 +651,19 @@ export default function PlayPage() {
     }
   }, [playerId, loading, me, code, router]);
 
+  // Phase-based background music
+  useEffect(() => {
+    if (!room) return;
+    const trackMap: Record<string, Parameters<typeof audio.playBg>[0]> = {
+      answer_submission: "bg-answering",
+      voting: "bg-voting",
+      results: "bg-results",
+      leaderboard: "bg-leaderboard",
+      game_over: "bg-gameover",
+    };
+    audio.playBg(trackMap[room.state] ?? null);
+  }, [room?.state]); // eslint-disable-line react-hooks/exhaustive-deps
+
   if (loading) return <Spinner />;
   if (error)   return <ErrorCard message={error} />;
   if (!room)   return null;
@@ -603,45 +672,60 @@ export default function PlayPage() {
   const myAnswer = currentRound ? answers.find((a) => a.player_id === me.id) : undefined;
   const myVotes  = currentRound ? votes.filter((v) => v.voter_id === me.id) : [];
 
-  switch (room.state) {
-    case "lobby":
-      return <PlayerLobby room={room} players={players} me={me} />;
+  return (
+    <>
+      <SoundButton audio={audio} />
+      {(() => {
+        switch (room.state) {
+          case "lobby":
+            return <PlayerLobby room={room} players={players} me={me} />;
 
-    case "answer_submission":
-      if (!currentRound) return <WaitingBanner text="Round starting…" />;
-      return <PlayerAnswerForm round={currentRound} me={me} existingAnswer={myAnswer} />;
+          case "answer_submission":
+            if (!currentRound) return <WaitingBanner text="Round starting…" />;
+            return (
+              <PlayerAnswerForm
+                round={currentRound}
+                me={me}
+                existingAnswer={myAnswer}
+                playSfx={audio.playSfx}
+              />
+            );
 
-    case "voting":
-      if (!currentRound) return <WaitingBanner text="Voting starting…" />;
-      return (
-        <PlayerVotingForm
-          round={currentRound}
-          me={me}
-          answers={answers}
-          myAnswer={myAnswer}
-          myVotes={myVotes}
-        />
-      );
+          case "voting":
+            if (!currentRound) return <WaitingBanner text="Voting starting…" />;
+            return (
+              <PlayerVotingForm
+                round={currentRound}
+                me={me}
+                answers={answers}
+                myAnswer={myAnswer}
+                myVotes={myVotes}
+                playSfx={audio.playSfx}
+              />
+            );
 
-    case "results":
-      if (!currentRound) return <WaitingBanner text="Loading results…" />;
-      return (
-        <PlayerResults
-          round={currentRound}
-          answers={answers}
-          votes={votes}
-          players={players}
-          me={me}
-        />
-      );
+          case "results":
+            if (!currentRound) return <WaitingBanner text="Loading results…" />;
+            return (
+              <PlayerResults
+                round={currentRound}
+                answers={answers}
+                votes={votes}
+                players={players}
+                me={me}
+              />
+            );
 
-    case "leaderboard":
-      return <PlayerLeaderboard players={players} me={me} />;
+          case "leaderboard":
+            return <PlayerLeaderboard players={players} me={me} />;
 
-    case "game_over":
-      return <PlayerGameOver players={players} me={me} />;
+          case "game_over":
+            return <PlayerGameOver players={players} me={me} />;
 
-    default:
-      return <WaitingBanner text="Waiting…" />;
-  }
+          default:
+            return <WaitingBanner text="Waiting…" />;
+        }
+      })()}
+    </>
+  );
 }
