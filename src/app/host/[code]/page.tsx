@@ -5,7 +5,6 @@ import { useParams } from "next/navigation";
 import { useGameRoom } from "@/hooks/useGameRoom";
 import { useAudio, type AudioController } from "@/hooks/useAudio";
 import { createClient } from "@/lib/supabase/client";
-import { MAX_VOTES_PER_PLAYER } from "@/lib/config";
 import type { Room, Player } from "@/lib/types";
 
 // ─── Shared UI ────────────────────────────────────────────────────────────────
@@ -428,15 +427,13 @@ function HostVotingPhase({
 
   const answererIds = new Set(answers.map((a) => a.player_id));
   const eligibleVoterCount = players.filter((p) => answererIds.has(p.id)).length;
-  const maxPossibleVotes = eligibleVoterCount * MAX_VOTES_PER_PLAYER;
-  const pct = maxPossibleVotes > 0 ? (votes.length / maxPossibleVotes) * 100 : 0;
 
-  const votesByVoter = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const v of votes) m.set(v.voter_id, (m.get(v.voter_id) ?? 0) + 1);
-    return m;
-  }, [votes]);
-  const doneVoterCount = [...votesByVoter.values()].filter((c) => c >= MAX_VOTES_PER_PLAYER).length;
+  // Count distinct players who have cast at least one vote
+  const votedPlayerCount = useMemo(
+    () => new Set(votes.map((v) => v.voter_id)).size,
+    [votes]
+  );
+  const pct = eligibleVoterCount > 0 ? (votedPlayerCount / eligibleVoterCount) * 100 : 0;
 
   async function endVoting() {
     setEnding(true); setErr("");
@@ -466,15 +463,12 @@ function HostVotingPhase({
       </div>
 
       <div className="glass rounded-3xl p-6 w-full animate-slide-up-2">
-        <div className="flex justify-between items-center mb-2">
-          <h2 className="text-base font-bold text-white/60">Votes cast</h2>
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-base font-bold text-white/60">Players voted</h2>
           <span className="text-3xl font-black text-gradient-party">
-            {votes.length}&thinsp;/&thinsp;{maxPossibleVotes}
+            {votedPlayerCount}&thinsp;/&thinsp;{eligibleVoterCount}
           </span>
         </div>
-        <p className="text-white/30 text-xs mb-4">
-          {doneVoterCount} of {eligibleVoterCount} players finished all {MAX_VOTES_PER_PLAYER} votes
-        </p>
         <div className="w-full h-3 bg-white/8 rounded-full overflow-hidden">
           <div
             className="h-full rounded-full transition-all duration-700"
