@@ -563,48 +563,17 @@ function PlayerLeaderboard({ players, me }: { players: Player[]; me: Player }) {
 
 // ─── Game Over ────────────────────────────────────────────────────────────────
 
-function PlayerGameOver({ players, me }: { players: Player[]; me: Player }) {
-  const sorted = useMemo(() => [...players].sort((a, b) => b.score - a.score), [players]);
-  const winner = sorted[0];
-  const iWon = winner?.id === me.id;
-
+function PlayerGameOver() {
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen px-4 text-center">
+    <div className="flex flex-col items-center justify-center min-h-screen px-4 text-center gap-6">
       <Confetti />
-
-      <div className="animate-pop text-8xl mb-4">{iWon ? "🏆" : "🎉"}</div>
-
-      <div className="animate-slide-up-1 mb-8">
-        <h1 className="text-4xl font-black text-gradient-gold mb-1 auto-dir" dir="auto">
-          {winner?.nickname ?? "Nobody"} wins!
-        </h1>
-        <p className="text-white/40 text-base">{winner?.score ?? 0} points</p>
-        {iWon && (
-          <p className="text-purple-300 font-bold mt-2 animate-slide-up-2">
-            That&apos;s you! 🌟
-          </p>
-        )}
+      <div className="animate-pop text-8xl">👀</div>
+      <div className="animate-slide-up-1 flex flex-col gap-2">
+        <h1 className="text-3xl font-black text-white">Final reveal is on the big screen!</h1>
+        <p className="text-white/40 text-base">Look at the TV/projector for the results</p>
       </div>
-
-      <div className="w-full max-w-xs flex flex-col gap-2 animate-slide-up-2 stagger">
-        {sorted.map((p, i) => (
-          <div
-            key={p.id}
-            className={`flex items-center gap-3 rounded-2xl px-4 py-3 ${
-              i < 3 ? RANK_CLASS[i] : "glass"
-            } ${p.id === me.id ? "ring-2 ring-purple-500/50" : ""}`}
-          >
-            <span className="text-lg w-6 text-center">
-              {i < 3 ? RANK_MEDAL[i] : <span className="text-white/30 text-sm font-bold">{i + 1}</span>}
-            </span>
-            <span className="text-white flex-1 font-semibold text-sm auto-dir" dir="auto">{p.nickname}</span>
-            <span className="text-gradient-gold font-black">{p.score}</span>
-          </div>
-        ))}
-      </div>
-
-      <p className="mt-10 text-white/20 text-sm animate-slide-up-3">
-        Thanks for playing! 🎂 Happy Birthday Nadav!
+      <p className="animate-slide-up-2 text-white/20 text-sm mt-6">
+        🎂 Happy Birthday Nadav!
       </p>
     </div>
   );
@@ -721,7 +690,7 @@ export default function PlayPage() {
             return <PlayerLeaderboard players={players} me={me} />;
 
           case "game_over":
-            return <PlayerGameOver players={players} me={me} />;
+            return <PlayerGameOver />;
 
           default:
             return <WaitingBanner text="Waiting…" />;

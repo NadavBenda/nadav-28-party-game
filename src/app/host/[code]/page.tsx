@@ -509,11 +509,17 @@ function HostVotingPhase({
   const [answersVisible, setAnswersVisible] = useState(true);
 
   const answererIds = new Set(answers.map((a) => a.player_id));
-  const eligibleVoterCount = players.filter((p) => answererIds.has(p.id)).length;
+  const eligibleVoters = players.filter((p) => answererIds.has(p.id));
+  const eligibleVoterCount = eligibleVoters.length;
 
-  const votedPlayerCount = useMemo(
-    () => new Set(votes.map((v) => v.voter_id)).size,
+  const votedPlayerIds = useMemo(
+    () => new Set(votes.map((v) => v.voter_id)),
     [votes]
+  );
+  const votedPlayerCount = votedPlayerIds.size;
+  const notYetVoted = useMemo(
+    () => eligibleVoters.filter((p) => !votedPlayerIds.has(p.id)),
+    [eligibleVoters, votedPlayerIds]
   );
   const pct = eligibleVoterCount > 0 ? (votedPlayerCount / eligibleVoterCount) * 100 : 0;
 
@@ -607,6 +613,18 @@ function HostVotingPhase({
             style={{ width: `${pct}%`, background: 'linear-gradient(90deg, #be185d, #db2777)' }}
           />
         </div>
+        {notYetVoted.length > 0 && (
+          <div className="mt-4">
+            <p className="text-white/25 text-xs mb-2 uppercase tracking-widest">Still waiting:</p>
+            <div className="flex flex-wrap gap-2">
+              {notYetVoted.map((p) => (
+                <span key={p.id} className="text-xs glass rounded-full px-3 py-1 text-white/50 auto-dir" dir="auto">
+                  {p.nickname}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {err && <p className="text-rose-400 text-sm font-medium text-center">{err}</p>}
