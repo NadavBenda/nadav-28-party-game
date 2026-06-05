@@ -1243,6 +1243,7 @@ export default function HostPage() {
   useEffect(() => {
     if (!room) return;
     const trackMap: Record<string, Parameters<typeof audio.playBg>[0]> = {
+      lobby: "bg-lobby",
       answer_submission: "bg-answering",
       voting: "bg-voting",
       results: "bg-results",

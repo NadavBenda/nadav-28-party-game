@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 
 export type BgTrack =
+  | "bg-lobby"
   | "bg-answering"
   | "bg-voting"
   | "bg-results"

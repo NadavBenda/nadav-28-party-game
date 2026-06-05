@@ -10,13 +10,18 @@ The game works perfectly even if audio is disabled or a file is missing.
 
 | File | Track | Mood |
 |------|-------|------|
+| `bg-lobby.mp3` | Fluffing a Duck | Upbeat, quirky, welcoming party/game-show |
 | `bg-answering.mp3` | Bounce Light 2 | Light, game-show thinking |
 | `bg-voting.mp3` | Puzzle Action | Energetic tension |
 | `bg-results.mp3` | Investigation (Remixed) | Dramatic reveal |
 | `bg-leaderboard.mp3` | The Winner | Upbeat celebration |
 | `bg-gameover.mp3` | Balloons Forever | Festive finale |
 
-**Source:** [SoundImage.org](https://soundimage.org) by Eric Matyas  
+**bg-lobby.mp3:** "Fluffing a Duck" by Kevin MacLeod — [incompetech.com](https://incompetech.com)  
+**License:** [CC BY 3.0](http://creativecommons.org/licenses/by/3.0/)  
+**Attribution:** "Fluffing a Duck" Kevin MacLeod (incompetech.com) Licensed under Creative Commons: By Attribution 3.0 License http://creativecommons.org/licenses/by/3.0/
+
+**Other BG tracks:** [SoundImage.org](https://soundimage.org) by Eric Matyas  
 **License:** Free for use in personal and commercial projects with attribution.  
 **Attribution:** "Music by Eric Matyas — www.soundimage.org"
 
