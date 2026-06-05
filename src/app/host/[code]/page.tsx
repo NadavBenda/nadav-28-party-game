@@ -475,6 +475,20 @@ function HostAnswerPhase({
 
 // ─── Voting Phase (host view) ─────────────────────────────────────────────────
 
+// Stable shuffle — each item gets a deterministic sort key from hash(seed + item.id)
+function hashStr(s: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 0x1000193) | 0;
+  return h >>> 0;
+}
+
+function useShuffled<T extends { id: string }>(items: T[], seed: string): T[] {
+  return useMemo(
+    () => [...items].sort((a, b) => hashStr(seed + a.id) - hashStr(seed + b.id)),
+    [items, seed]
+  );
+}
+
 function HostVotingPhase({
   room,
   players,
@@ -492,16 +506,19 @@ function HostVotingPhase({
 }) {
   const [ending, setEnding] = useState(false);
   const [err, setErr] = useState("");
+  const [answersVisible, setAnswersVisible] = useState(true);
 
   const answererIds = new Set(answers.map((a) => a.player_id));
   const eligibleVoterCount = players.filter((p) => answererIds.has(p.id)).length;
 
-  // Count distinct players who have cast at least one vote
   const votedPlayerCount = useMemo(
     () => new Set(votes.map((v) => v.voter_id)).size,
     [votes]
   );
   const pct = eligibleVoterCount > 0 ? (votedPlayerCount / eligibleVoterCount) * 100 : 0;
+
+  // Shuffle answers deterministically by round id so order is stable across re-renders
+  const shuffledAnswers = useShuffled(answers, currentRound.id);
 
   async function endVoting() {
     setEnding(true); setErr("");
@@ -518,20 +535,67 @@ function HostVotingPhase({
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-6 md:p-10 max-w-3xl mx-auto w-full gap-6">
+    <div className="min-h-screen flex flex-col p-6 md:p-8 max-w-5xl mx-auto w-full gap-6">
 
-      <div className="text-center animate-slide-up">
+      {/* Header row */}
+      <div className="flex items-center justify-between gap-4 animate-slide-up">
         <span className="glass px-4 py-1.5 rounded-full text-xs font-bold text-pink-300 uppercase tracking-widest">
           Round {currentRound.round_number} · Voting
         </span>
+        <button
+          type="button"
+          onClick={() => setAnswersVisible((v) => !v)}
+          className="glass hover:glass-strong text-white/60 hover:text-white text-xs font-bold px-3 py-2 rounded-xl transition-all"
+        >
+          {answersVisible ? "🙈 Hide Answers" : "👀 Show Answers"}
+        </button>
       </div>
 
+      {/* Prompt */}
       <div className="glass rounded-3xl p-6 w-full text-center animate-slide-up-1">
-        <p className="text-2xl font-bold text-white auto-dir" dir="auto">{currentRound.prompt_text}</p>
+        <p className="text-white/40 text-xs font-bold uppercase tracking-widest mb-2">The Prompt</p>
+        <p className="text-3xl font-black text-white leading-tight auto-dir" dir="auto">
+          {currentRound.prompt_text}
+        </p>
       </div>
 
-      <div className="glass rounded-3xl p-6 w-full animate-slide-up-2">
-        <div className="flex justify-between items-center mb-4">
+      {/* Answer cards — projector-friendly, no authors */}
+      {answersVisible && (
+        <div className={`grid gap-4 animate-slide-up-2 ${
+          shuffledAnswers.length <= 2
+            ? "grid-cols-1 md:grid-cols-2"
+            : shuffledAnswers.length <= 4
+            ? "grid-cols-1 md:grid-cols-2"
+            : "grid-cols-1 md:grid-cols-2 lg:grid-cols-3"
+        }`}>
+          {shuffledAnswers.map((a, i) => (
+            <div
+              key={a.id}
+              className="glass rounded-3xl p-6 flex flex-col gap-3 animate-pop"
+              style={{ animationDelay: `${i * 0.06}s` }}
+            >
+              <div className="flex items-start gap-3">
+                <span className="text-white/20 text-2xl font-black leading-none flex-shrink-0 select-none">
+                  {i + 1}
+                </span>
+                <p className="text-2xl md:text-3xl font-black text-white leading-snug auto-dir flex-1" dir="auto">
+                  {a.text}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!answersVisible && (
+        <div className="flex-1 flex items-center justify-center animate-slide-up-2">
+          <p className="text-white/20 text-lg font-bold">Answers hidden — tap &ldquo;Show Answers&rdquo; to reveal</p>
+        </div>
+      )}
+
+      {/* Voting progress */}
+      <div className="glass rounded-3xl p-5 w-full animate-slide-up-3">
+        <div className="flex justify-between items-center mb-3">
           <h2 className="text-base font-bold text-white/60">Players voted</h2>
           <span className="text-3xl font-black text-gradient-party">
             {votedPlayerCount}&thinsp;/&thinsp;{eligibleVoterCount}
@@ -545,17 +609,19 @@ function HostVotingPhase({
         </div>
       </div>
 
-      {err && <p className="text-rose-400 text-sm font-medium">{err}</p>}
-      <button
-        onClick={endVoting}
-        disabled={ending}
-        className="btn btn-pink px-12 py-5 text-xl rounded-2xl animate-slide-up-3"
-      >
-        {ending ? "Ending…" : "🏁 Reveal Results"}
-      </button>
-      {votes.length === 0 && (
-        <p className="text-white/25 text-sm">No votes yet — you can still advance</p>
-      )}
+      {err && <p className="text-rose-400 text-sm font-medium text-center">{err}</p>}
+      <div className="text-center pb-2">
+        <button
+          onClick={endVoting}
+          disabled={ending}
+          className="btn btn-pink px-12 py-5 text-xl rounded-2xl"
+        >
+          {ending ? "Ending…" : "🏁 Reveal Results"}
+        </button>
+        {votes.length === 0 && (
+          <p className="text-white/25 text-sm mt-3">No votes yet — you can still advance</p>
+        )}
+      </div>
     </div>
   );
 }
