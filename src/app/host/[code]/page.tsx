@@ -183,6 +183,7 @@ function HostLobby({ room, players, pin }: { room: Room; players: Player[]; pin:
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState("");
   const [loadingPromptCount, setLoadingPromptCount] = useState(true);
+  const [promptsCollapsed, setPromptsCollapsed] = useState(false);
 
   useEffect(() => {
     const supabase = createClient();
@@ -194,6 +195,7 @@ function HostLobby({ room, players, pin }: { room: Room; players: Player[]; pin:
       .then(({ count }) => {
         setSavedCount(count ?? 0);
         setLoadingPromptCount(false);
+        if ((count ?? 0) > 0) setPromptsCollapsed(true);
       });
   }, [room.id]);
 
@@ -212,6 +214,8 @@ function HostLobby({ room, players, pin }: { room: Room; players: Player[]; pin:
       const data = await res.json();
       if (!res.ok) { setSaveError(data.error ?? "Failed to save prompts."); return; }
       setSavedCount(data.count);
+      setPromptsText("");
+      setPromptsCollapsed(true);
     } catch {
       setSaveError("Network error.");
     } finally {
@@ -241,114 +245,138 @@ function HostLobby({ room, players, pin }: { room: Room; players: Player[]; pin:
   const canStart = promptsReady && players.length >= 2;
 
   return (
-    <div className="min-h-screen flex flex-col p-6 md:p-10 max-w-5xl mx-auto w-full gap-8">
+    <div className="min-h-screen flex flex-col p-6 md:p-8 max-w-7xl mx-auto w-full gap-6">
 
-      <div className="text-center animate-slide-up pt-4">
-        <p className="text-white/30 text-xs font-bold uppercase tracking-[0.3em] mb-3">
-          Room Code — share this with players
-        </p>
-        <div className="inline-block">
-          <p className="text-shimmer text-8xl md:text-9xl font-black tracking-[0.2em] leading-none select-all">
-            {room.code}
-          </p>
-        </div>
-        <p className="text-white/25 text-sm mt-3 mb-5">
-          Scan to join — or go to the game URL and enter this code
-        </p>
-        <div className="flex justify-center animate-slide-up-1">
-          <RoomQR roomCode={room.code} size={180} />
-        </div>
-      </div>
+      {/* ── Main area: left column (info + players + start) | right column (QR) ── */}
+      <div className="flex flex-col md:flex-row gap-6 flex-1">
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 flex-1">
+        {/* Left column */}
+        <div className="flex flex-col gap-5 flex-1 animate-slide-up">
 
-        <div className="glass rounded-3xl p-6 animate-slide-up-1">
-          <div className="flex items-center gap-3 mb-5">
-            <span className="text-2xl">👥</span>
-            <h2 className="text-lg font-black text-white flex-1">Players</h2>
-            <span className="bg-purple-600/60 text-purple-100 text-sm font-black px-3 py-1 rounded-full">
-              {players.length}
-            </span>
-          </div>
-          {players.length === 0 ? (
-            <div className="text-center py-6">
-              <p className="text-white/25 text-sm">Waiting for players to join…</p>
-              <div className="flex gap-2 justify-center mt-4">
-                <div className="w-2 h-2 bg-purple-500 rounded-full dot-1" />
-                <div className="w-2 h-2 bg-purple-500 rounded-full dot-2" />
-                <div className="w-2 h-2 bg-purple-500 rounded-full dot-3" />
-              </div>
-            </div>
-          ) : (
-            <ul className="flex flex-col gap-2 stagger">
-              {players.map((p) => (
-                <li
-                  key={p.id}
-                  className="flex items-center gap-3 bg-white/5 rounded-2xl px-4 py-2.5"
-                >
-                  <div className="w-2 h-2 bg-green-400 rounded-full flex-shrink-0 animate-pulse-slow" />
-                  <span className="text-white font-semibold text-sm auto-dir" dir="auto">{p.nickname}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-          {players.length > 0 && players.length < 2 && (
-            <p className="mt-4 text-amber-400/80 text-xs font-medium text-center">
-              Need at least 2 players to start
+          {/* Room code */}
+          <div className="text-center md:text-left pt-2">
+            <p className="text-white/30 text-xs font-bold uppercase tracking-[0.3em] mb-2">
+              Room Code
             </p>
-          )}
-        </div>
-
-        <div className="glass rounded-3xl p-6 animate-slide-up-2">
-          <div className="flex items-center gap-3 mb-5">
-            <span className="text-2xl">📝</span>
-            <h2 className="text-lg font-black text-white flex-1">Prompts</h2>
-            {!loadingPromptCount && (savedCount ?? 0) > 0 && (
-              <span className="text-emerald-400 text-sm font-black">
-                ✓ {savedCount} ready
-              </span>
-            )}
+            <p className="text-shimmer text-7xl md:text-8xl font-black tracking-[0.2em] leading-none select-all">
+              {room.code}
+            </p>
+            <p className="text-white/25 text-sm mt-2">
+              Scan the QR or enter this code at the game URL
+            </p>
           </div>
-          <form onSubmit={savePrompts} className="flex flex-col gap-3">
-            <textarea
-              value={promptsText}
-              onChange={(e) => { setPromptsText(e.target.value); }}
-              placeholder={"One prompt per line:\n\nWhat is the most Nadav thing Nadav could do?\nComplete this sentence: Nadav walks into a bar…"}
-              rows={8}
-              className="auto-dir w-full px-4 py-3 rounded-2xl bg-white/6 border border-white/8 text-white text-sm placeholder-white/20 resize-none focus:outline-none focus:border-purple-500/50 focus:ring-2 focus:ring-purple-500/20 transition-all"
-            />
-            {saveError && <p className="text-rose-400 text-sm font-medium">{saveError}</p>}
-            {(savedCount ?? 0) > 0 && promptsText.trim() === "" && (
-              <p className="text-emerald-400/80 text-xs">
-                ✓ {savedCount} prompts saved. Paste new ones above to replace them.
+
+          {/* Players list */}
+          <div className="glass rounded-3xl p-5 animate-slide-up-1">
+            <div className="flex items-center gap-3 mb-4">
+              <span className="text-xl">👥</span>
+              <h2 className="text-base font-black text-white flex-1">Players</h2>
+              <span className="bg-purple-600/60 text-purple-100 text-sm font-black px-3 py-1 rounded-full">
+                {players.length}
+              </span>
+            </div>
+            {players.length === 0 ? (
+              <div className="text-center py-4">
+                <p className="text-white/25 text-sm">Waiting for players to join…</p>
+                <div className="flex gap-2 justify-center mt-3">
+                  <div className="w-2 h-2 bg-purple-500 rounded-full dot-1" />
+                  <div className="w-2 h-2 bg-purple-500 rounded-full dot-2" />
+                  <div className="w-2 h-2 bg-purple-500 rounded-full dot-3" />
+                </div>
+              </div>
+            ) : (
+              <ul className="flex flex-wrap gap-2 stagger">
+                {players.map((p) => (
+                  <li
+                    key={p.id}
+                    className="flex items-center gap-2 bg-white/5 rounded-2xl px-3 py-2"
+                  >
+                    <div className="w-2 h-2 bg-green-400 rounded-full flex-shrink-0 animate-pulse-slow" />
+                    <span className="text-white font-semibold text-sm auto-dir" dir="auto">{p.nickname}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {players.length > 0 && players.length < 2 && (
+              <p className="mt-3 text-amber-400/80 text-xs font-medium text-center">
+                Need at least 2 players to start
               </p>
             )}
+          </div>
+
+          {/* Start button */}
+          <div className="text-center md:text-left animate-slide-up-2">
+            {startError && <p className="text-rose-400 text-sm font-medium mb-3">{startError}</p>}
             <button
-              type="submit"
-              disabled={savingPrompts || !promptsText.trim()}
-              className="btn btn-purple py-3 text-sm rounded-xl"
+              onClick={startGame}
+              disabled={!canStart || starting || loadingPromptCount}
+              className={`btn btn-green px-16 py-5 text-xl rounded-3xl w-full md:w-auto ${canStart && !starting ? "animate-glow" : ""}`}
             >
-              {savingPrompts ? "Saving…" : "Save Prompts"}
+              {starting ? "Starting…" : "🚀 Start Game!"}
             </button>
-          </form>
+            {!canStart && !loadingPromptCount && (
+              <p className="text-white/25 text-sm mt-2">
+                {!promptsReady ? "Save prompts first." : "Need at least 2 players."}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Right column — QR code (large, projector-friendly) */}
+        <div className="flex flex-col items-center justify-start md:justify-center gap-4 md:w-80 lg:w-96 animate-slide-up-1 flex-shrink-0">
+          <div className="glass rounded-3xl p-6 flex flex-col items-center gap-4 w-full">
+            <p className="text-white/40 text-xs font-bold uppercase tracking-[0.25em]">Scan to Join</p>
+            <RoomQR roomCode={room.code} size={240} />
+          </div>
         </div>
       </div>
 
-      <div className="text-center pb-4 animate-slide-up-3">
-        {startError && <p className="text-rose-400 text-sm font-medium mb-4">{startError}</p>}
+      {/* ── Prompts section — collapsible, at the bottom ── */}
+      <div className="glass rounded-3xl overflow-hidden animate-slide-up-2">
         <button
-          onClick={startGame}
-          disabled={!canStart || starting || loadingPromptCount}
-          className={`btn btn-green px-20 py-6 text-2xl rounded-3xl ${canStart && !starting ? "animate-glow" : ""}`}
+          type="button"
+          onClick={() => setPromptsCollapsed((c) => !c)}
+          className="w-full flex items-center gap-3 px-5 py-4 hover:bg-white/5 transition-colors text-left"
         >
-          {starting ? "Starting…" : "🚀 Start Game!"}
+          <span className="text-lg">📝</span>
+          <span className="text-base font-black text-white flex-1">Prompts</span>
+          {!loadingPromptCount && (savedCount ?? 0) > 0 && (
+            <span className="text-emerald-400 text-sm font-black">✓ {savedCount} ready</span>
+          )}
+          {loadingPromptCount && (
+            <span className="text-white/30 text-sm">Loading…</span>
+          )}
+          <span className="text-white/40 text-sm ml-2">{promptsCollapsed ? "▼ Edit" : "▲ Hide"}</span>
         </button>
-        {!canStart && !loadingPromptCount && (
-          <p className="text-white/25 text-sm mt-3">
-            {!promptsReady ? "Save prompts first." : "Need at least 2 players."}
-          </p>
+
+        {!promptsCollapsed && (
+          <div className="px-5 pb-5">
+            <form onSubmit={savePrompts} className="flex flex-col gap-3">
+              <textarea
+                value={promptsText}
+                onChange={(e) => { setPromptsText(e.target.value); }}
+                placeholder={"One prompt per line:\n\nWhat is the most Nadav thing Nadav could do?\nComplete this sentence: Nadav walks into a bar…"}
+                rows={6}
+                className="auto-dir w-full px-4 py-3 rounded-2xl bg-white/6 border border-white/8 text-white text-sm placeholder-white/20 resize-none focus:outline-none focus:border-purple-500/50 focus:ring-2 focus:ring-purple-500/20 transition-all"
+              />
+              {saveError && <p className="text-rose-400 text-sm font-medium">{saveError}</p>}
+              {(savedCount ?? 0) > 0 && promptsText.trim() === "" && (
+                <p className="text-emerald-400/80 text-xs">
+                  ✓ {savedCount} prompts saved. Paste new ones above to replace them.
+                </p>
+              )}
+              <button
+                type="submit"
+                disabled={savingPrompts || !promptsText.trim()}
+                className="btn btn-purple py-3 text-sm rounded-xl"
+              >
+                {savingPrompts ? "Saving…" : "Save Prompts"}
+              </button>
+            </form>
+          </div>
         )}
       </div>
+
     </div>
   );
 }
