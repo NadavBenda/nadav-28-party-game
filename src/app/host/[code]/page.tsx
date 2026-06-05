@@ -551,6 +551,19 @@ function HostResultsPhase({
 }) {
   const [advancing, setAdvancing] = useState(false);
   const [err, setErr] = useState("");
+  const [isLastRound, setIsLastRound] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const supabase = createClient();
+    supabase
+      .from("prompts")
+      .select("id", { count: "exact", head: true })
+      .eq("room_id", room.id)
+      .eq("used", false)
+      .then(({ count }) => {
+        setIsLastRound((count ?? 0) === 0);
+      });
+  }, [room.id]);
 
   const sorted = useMemo(() =>
     [...answers]
@@ -570,6 +583,20 @@ function HostResultsPhase({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ pin, action: "show_leaderboard" }),
+      });
+      const data = await res.json();
+      if (!res.ok) setErr(data.error ?? "Failed.");
+    } catch { setErr("Network error."); }
+    finally { setAdvancing(false); }
+  }
+
+  async function endGameFinal() {
+    setAdvancing(true); setErr("");
+    try {
+      const res = await fetch(`/api/rooms/${room.code}/host/action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin, action: "end_game" }),
       });
       const data = await res.json();
       if (!res.ok) setErr(data.error ?? "Failed.");
@@ -632,13 +659,23 @@ function HostResultsPhase({
 
       {err && <p className="text-rose-400 text-sm font-medium text-center">{err}</p>}
       <div className="text-center pb-4">
-        <button
-          onClick={showLeaderboard}
-          disabled={advancing}
-          className="btn btn-purple px-12 py-5 text-xl rounded-2xl"
-        >
-          {advancing ? "Loading…" : "📊 Show Leaderboard"}
-        </button>
+        {isLastRound === true ? (
+          <button
+            onClick={endGameFinal}
+            disabled={advancing}
+            className="btn btn-amber px-12 py-5 text-xl rounded-2xl"
+          >
+            {advancing ? "Loading…" : "🏆 Final Reveal!"}
+          </button>
+        ) : (
+          <button
+            onClick={showLeaderboard}
+            disabled={advancing || isLastRound === null}
+            className="btn btn-purple px-12 py-5 text-xl rounded-2xl"
+          >
+            {advancing ? "Loading…" : "📊 Show Leaderboard"}
+          </button>
+        )}
       </div>
     </div>
   );
