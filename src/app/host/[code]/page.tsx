@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, useSyncExternalStore } from "react";
 import { useParams } from "next/navigation";
+import { QRCodeSVG } from "qrcode.react";
 import { useGameRoom } from "@/hooks/useGameRoom";
 import { useAudio, type AudioController } from "@/hooks/useAudio";
 import { createClient } from "@/lib/supabase/client";
@@ -27,6 +28,42 @@ function ErrorCard({ message }: { message: string }) {
         <div className="text-4xl mb-4">😕</div>
         <p className="text-rose-300 text-lg font-semibold">{message}</p>
       </div>
+    </div>
+  );
+}
+
+// ─── Room QR Code ─────────────────────────────────────────────────────────────
+
+// useSyncExternalStore provides a server snapshot ("") and a client snapshot
+// (window.location.origin), avoiding hydration mismatches and setState-in-effect.
+function useOrigin() {
+  return useSyncExternalStore(
+    () => () => {},                   // no external subscription needed
+    () => window.location.origin,     // client snapshot
+    () => "",                         // server snapshot
+  );
+}
+
+function RoomQR({ roomCode, size = 160 }: { roomCode: string; size?: number }) {
+  const origin = useOrigin();
+  if (!origin) return null;           // server-side: render nothing
+
+  const url = `${origin}/play/${roomCode}`;
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <div className="rounded-2xl bg-white p-3 shadow-lg">
+        <QRCodeSVG
+          value={url}
+          size={size}
+          bgColor="#ffffff"
+          fgColor="#1a1a2e"
+          level="M"
+        />
+      </div>
+      <p className="text-white/30 text-xs font-mono break-all text-center" style={{ maxWidth: size + 24 }}>
+        {url}
+      </p>
     </div>
   );
 }
@@ -215,9 +252,12 @@ function HostLobby({ room, players, pin }: { room: Room; players: Player[]; pin:
             {room.code}
           </p>
         </div>
-        <p className="text-white/25 text-sm mt-3">
-          Players join at the game URL and enter this code
+        <p className="text-white/25 text-sm mt-3 mb-5">
+          Scan to join — or go to the game URL and enter this code
         </p>
+        <div className="flex justify-center animate-slide-up-1">
+          <RoomQR roomCode={room.code} size={180} />
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 flex-1">
@@ -710,6 +750,14 @@ function HostLeaderboard({
             Tap anywhere to reveal next place…
           </p>
         )}
+      </div>
+
+      {/* Small QR for late-joiners */}
+      <div
+        className="self-center animate-slide-up"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <RoomQR roomCode={room.code} size={96} />
       </div>
 
       <div className="w-full flex flex-col gap-3 flex-1">
