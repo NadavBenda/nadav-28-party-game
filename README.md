@@ -1,6 +1,9 @@
 # Party Game 🎂
 
-A Quiplash-style birthday party game. Host shows questions on a TV/projector, players answer from their phones, everyone votes anonymously, and the funniest answer wins.
+A Quiplash-style birthday party game. Host shows questions on a TV/projector, players answer from their phones, everyone votes anonymously, and the most voted answer wins!
+
+<img src="Screenshot_6.jpg" alt="op screen" width="400">
+
 
 Built with **Next.js 16 + Supabase Realtime**. All screens update live — no page refreshes.
 
